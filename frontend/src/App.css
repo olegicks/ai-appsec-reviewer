@@ -1,0 +1,27 @@
+* { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+body { margin: 0; padding: 0; background-color: #1e1e1e; color: #fff; }
+
+.app-container { display: flex; flex-direction: column; height: 100vh; padding: 20px; }
+.header { text-align: center; margin-bottom: 20px; }
+.header h1 { margin: 0; color: #4CAF50; }
+.header p { margin: 5px 0 0; color: #aaa; }
+
+.toolbar { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; }
+button { padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; background: #333; color: white; transition: 0.2s; }
+button:hover { background: #444; }
+.scan-btn { background: #4CAF50; font-weight: bold; font-size: 16px; }
+.scan-btn:hover { background: #45a049; }
+.scan-btn:disabled { background: #555; cursor: not-allowed; }
+
+.main-content { display: flex; gap: 20px; flex: 1; }
+.editor-section { flex: 1; border: 1px solid #333; border-radius: 5px; overflow: hidden; }
+.results-section { flex: 1; background: #252526; border-radius: 5px; padding: 20px; overflow-y: auto; border: 1px solid #333; }
+
+.vuln-card { background: #3a1c1c; border-left: 4px solid #ff4444; padding: 15px; margin-bottom: 15px; border-radius: 4px; }
+.vuln-card h3 { margin-top: 0; color: #ff6b6b; }
+.fix-block { background: #1e1e1e; padding: 10px; border-radius: 4px; margin-top: 10px; }
+.fix-block pre { color: #4CAF50; margin-bottom: 0; white-space: pre-wrap; }
+
+.loader { text-align: center; font-size: 18px; color: #aaa; margin-top: 50px; }
+.error { color: #ff4444; background: #3a1c1c; padding: 15px; border-radius: 4px; }
+.success { color: #4CAF50; background: #1c3a1e; padding: 15px; border-radius: 4px; }
