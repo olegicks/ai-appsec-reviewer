@@ -19,7 +19,7 @@ function App() {
     setVulnerabilities(null);
     
     try {
-      const response = await fetch('https://ai-appsec-reviewer.onrender.com/', {
+      const response = await fetch('https://ai-appsec-reviewer.onrender.com/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code })
