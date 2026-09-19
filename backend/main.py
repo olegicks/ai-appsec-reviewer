@@ -44,18 +44,26 @@ class AnalyzeRequest(BaseModel):
 
 def get_system_prompt(paranoia: str) -> str:
     base_prompt = (
-        "You are a senior AppSec engineer. Analyze the provided source code or repository structure and the raw findings from the static scanners. "
-        "Verify findings, eliminate false positives, and identify logical vulnerabilities. "
+        "You are a senior AppSec engineer. Analyze the provided code and static scanner findings. "
+        "Your primary task is to VALIDATE findings and strictly ELIMINATE false positives. "
     )
     if paranoia == "aggressive":
-        base_prompt += "Flag EVERY potential issue, including minor best-practice violations, code smells, and theoretical risks. "
+        base_prompt += (
+            "Report all potential risks, including low-severity warnings, best-practice violations "
+            "(e.g., safe subprocess calls), and informational findings. "
+        )
     else:
-        base_prompt += "Focus strictly on critical OWASP Top 10 vulnerabilities and highly exploitable flaws. Ignore minor stylistic issues. "
+        base_prompt += (
+            "Report ONLY definitively exploitable vulnerabilities (e.g., Command Injection with user-controlled input). "
+            "You MUST ignore and filter out unexploitable warnings (e.g., subprocess calls with hardcoded strings and shell=False). "
+        )
         
     base_prompt += (
+        "For the 'line_number' field, NEVER output temporary system paths like /tmp/. "
+        "Format it cleanly as 'Line X' for snippets, or 'filename:X' for repositories.\n"
         "Your response MUST be a valid JSON object strictly matching this structure:\n"
-        "{\n  \"vulnerabilities\": [\n    {\n      \"line_number\": \"File name or Line number\",\n"
-        "      \"vulnerability_type\": \"Vulnerability Name\",\n      \"risk_explanation\": \"Technical explanation\",\n"
+        "{\n  \"vulnerabilities\": [\n    {\n      \"line_number\": \"Clean location\",\n"
+        "      \"vulnerability_type\": \"Vulnerability Name (Severity)\",\n      \"risk_explanation\": \"Technical explanation\",\n"
         "      \"secure_code_snippet\": \"Fixed code block\"\n    }\n  ]\n}\n"
         "If the code is fully secure, return {\"vulnerabilities\": []}."
     )
@@ -81,10 +89,17 @@ def run_bandit(code: str) -> str:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".py", mode='w', encoding='utf-8') as temp_file:
             temp_file.write(code)
             temp_path = temp_file.name
+            
         result = subprocess.run(['bandit', '-f', 'json', '-q', temp_path], capture_output=True, text=True)
+        
         if result.stdout:
             bandit_data = json.loads(result.stdout)
             findings = bandit_data.get("results", [])
+            
+            for finding in findings:
+                if "filename" in finding:
+                    finding["filename"] = "Snippet"
+                    
             return json.dumps(findings) if findings else "No Bandit findings."
         return "No Bandit findings."
     except Exception:
