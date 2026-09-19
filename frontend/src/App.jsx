@@ -77,15 +77,36 @@ function App() {
         </div>
         
         {mode === 'snippet' && (
-          <div className="config-group">
-            <label>Language:</label>
-            <select value={language} onChange={(e) => setLanguage(e.target.value)}>
-              <option value="python">Python</option>
-              <option value="javascript">JavaScript</option>
-              <option value="java">Java</option>
-              <option value="cpp">C++</option>
-            </select>
-          </div>
+          <>
+            <div className="config-group">
+              <label>Language:</label>
+              <select value={language} onChange={(e) => setLanguage(e.target.value)}>
+                <option value="python">Python</option>
+                <option value="javascript">JavaScript</option>
+                <option value="java">Java</option>
+                <option value="cpp">C++</option>
+              </select>
+            </div>
+            
+            <div className="config-group">
+              <label>Examples:</label>
+              <select 
+                onChange={(e) => {
+                  if (e.target.value) {
+                    loadTemplate(e.target.value);
+                    e.target.value = ""; // Скидаємо вибір, щоб можна було обрати знову
+                  }
+                }} 
+                defaultValue=""
+              >
+                <option value="" disabled>Load template...</option>
+                <option value="python">Python - SQL Injection</option>
+                <option value="javascript">JavaScript - Cross-Site Scripting (XSS)</option>
+                <option value="java">Java - Hardcoded Secrets</option>
+                <option value="cpp">C++ - Buffer Overflow</option>
+              </select>
+            </div>
+          </>
         )}
 
         <div className="config-group">
@@ -100,15 +121,6 @@ function App() {
           {loading ? 'Processing...' : 'Run Analysis'}
         </button>
       </div>
-
-      {mode === 'snippet' && (
-        <div className="example-buttons">
-          <button className="btn secondary outline" onClick={() => loadTemplate('python')}>SQLi (Py)</button>
-          <button className="btn secondary outline" onClick={() => loadTemplate('javascript')}>XSS (JS)</button>
-          <button className="btn secondary outline" onClick={() => loadTemplate('java')}>Secrets (Java)</button>
-          <button className="btn secondary outline" onClick={() => loadTemplate('cpp')}>Buffer (C++)</button>
-        </div>
-      )}
 
       <div className="main-content">
         <div className="input-section">
