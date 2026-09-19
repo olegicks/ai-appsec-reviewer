@@ -63,7 +63,7 @@ function App() {
   return (
     <div className="app-container">
       <header className="header">
-        <h1>🛡️ AppSec Code Reviewer</h1>
+        <h1>AppSec Code Reviewer</h1>
         <p>Advanced SAST and AI hybrid analysis pipeline</p>
       </header>
 
@@ -89,19 +89,20 @@ function App() {
             </div>
             
             <div className="config-group">
-              <label>Examples:</label>
+              <label className="highlight-label">Try Examples:</label>
               <select 
+                className="highlight-select"
                 onChange={(e) => {
                   if (e.target.value) {
                     loadTemplate(e.target.value);
-                    e.target.value = ""; // Скидаємо вибір, щоб можна було обрати знову
+                    e.target.value = ""; 
                   }
                 }} 
                 defaultValue=""
               >
-                <option value="" disabled>Load template...</option>
+                <option value="" disabled>Select a vulnerability...</option>
                 <option value="python">Python - SQL Injection</option>
-                <option value="javascript">JavaScript - Cross-Site Scripting (XSS)</option>
+                <option value="javascript">JavaScript - DOM XSS</option>
                 <option value="java">Java - Hardcoded Secrets</option>
                 <option value="cpp">C++ - Buffer Overflow</option>
               </select>
@@ -112,8 +113,8 @@ function App() {
         <div className="config-group">
           <label>Paranoia Level:</label>
           <select value={paranoia} onChange={(e) => setParanoia(e.target.value)}>
-            <option value="standard">Standard (Exploitable only)</option>
-            <option value="aggressive">Aggressive (All Warnings)</option>
+            <option value="standard">Standard</option>
+            <option value="aggressive">Aggressive</option>
           </select>
         </div>
 
@@ -155,10 +156,10 @@ function App() {
           
           <div className="results-body">
             {loading && <div className="status-message">Executing hybrid pipeline...</div>}
-            {error && <div className="status-message error">❌ {error}</div>}
+            {error && <div className="status-message error">{error}</div>}
             
             {!loading && vulnerabilities?.length === 0 && (
-              <div className="status-message success">✅ Zero vulnerabilities detected. Code passes security baseline.</div>
+              <div className="status-message success">Zero vulnerabilities detected. Code passes security baseline.</div>
             )}
 
             {!loading && vulnerabilities?.map((vuln, index) => (
