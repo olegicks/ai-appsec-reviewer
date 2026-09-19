@@ -8,6 +8,7 @@ import json
 import re
 import tempfile
 import subprocess
+import shutil
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -23,7 +24,7 @@ client = OpenAI(api_key=API_KEY)
 MODEL_ID = "gpt-4o-mini"
 
 limiter = Limiter(key_func=get_remote_address)
-app = FastAPI(title="AppSec Code Reviewer API")
+app = FastAPI()
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -35,26 +36,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class CodeRequest(BaseModel):
-    code: str = Field(..., min_length=5, max_length=10000)
+class AnalyzeRequest(BaseModel):
+    code: str = Field(default="")
     language: str = Field(default="python")
+    repo_url: str = Field(default="")
+    paranoia_level: str = Field(default="standard")
 
-SYSTEM_PROMPT = """
-You are a senior AppSec engineer. Analyze the provided source code and the raw findings from the static scanners.
-Verify the static findings, eliminate false positives, and identify logical vulnerabilities (OWASP Top 10).
-Your response MUST be a valid JSON object strictly matching this structure:
-{
-  "vulnerabilities": [
-    {
-      "line_number": 12,
-      "vulnerability_type": "Vulnerability Name",
-      "risk_explanation": "Technical explanation of the risk",
-      "secure_code_snippet": "Fixed and secure code block"
-    }
-  ]
-}
-If the code is fully secure, return {"vulnerabilities": []}.
-"""
+def get_system_prompt(paranoia: str) -> str:
+    base_prompt = (
+        "You are a senior AppSec engineer. Analyze the provided source code or repository structure and the raw findings from the static scanners. "
+        "Verify findings, eliminate false positives, and identify logical vulnerabilities. "
+    )
+    if paranoia == "aggressive":
+        base_prompt += "Flag EVERY potential issue, including minor best-practice violations, code smells, and theoretical risks. "
+    else:
+        base_prompt += "Focus strictly on critical OWASP Top 10 vulnerabilities and highly exploitable flaws. Ignore minor stylistic issues. "
+        
+    base_prompt += (
+        "Your response MUST be a valid JSON object strictly matching this structure:\n"
+        "{\n  \"vulnerabilities\": [\n    {\n      \"line_number\": \"File name or Line number\",\n"
+        "      \"vulnerability_type\": \"Vulnerability Name\",\n      \"risk_explanation\": \"Technical explanation\",\n"
+        "      \"secure_code_snippet\": \"Fixed code block\"\n    }\n  ]\n}\n"
+        "If the code is fully secure, return {\"vulnerabilities\": []}."
+    )
+    return base_prompt
 
 def scan_secrets(code: str) -> str:
     patterns = {
@@ -62,15 +67,12 @@ def scan_secrets(code: str) -> str:
         "Hardcoded Credential": r"(?i)(password|secret|token|api_key|apikey)[=:\s]+[\"'][a-zA-Z0-9_\-\.]+[\"']",
         "Bearer Token": r"Bearer\s+[A-Za-z0-9\-\._~]+"
     }
-    
     findings = []
     lines = code.splitlines()
-    
     for line_num, line in enumerate(lines, 1):
         for secret_type, pattern in patterns.items():
             if re.search(pattern, line):
                 findings.append(f"Line {line_num}: Possible {secret_type} detected.")
-    
     return json.dumps(findings) if findings else "No secrets detected."
 
 def run_bandit(code: str) -> str:
@@ -79,13 +81,7 @@ def run_bandit(code: str) -> str:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".py", mode='w', encoding='utf-8') as temp_file:
             temp_file.write(code)
             temp_path = temp_file.name
-
-        result = subprocess.run(
-            ['bandit', '-f', 'json', '-q', temp_path],
-            capture_output=True,
-            text=True
-        )
-        
+        result = subprocess.run(['bandit', '-f', 'json', '-q', temp_path], capture_output=True, text=True)
         if result.stdout:
             bandit_data = json.loads(result.stdout)
             findings = bandit_data.get("results", [])
@@ -97,21 +93,55 @@ def run_bandit(code: str) -> str:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
 
+def clone_and_read_repo(repo_url: str) -> str:
+    temp_dir = tempfile.mkdtemp()
+    combined_code = ""
+    try:
+        subprocess.run(["git", "clone", "--depth", "1", repo_url, temp_dir], check=True, capture_output=True)
+        for root, dirs, files in os.walk(temp_dir):
+            if '.git' in dirs:
+                dirs.remove('.git')
+            for file in files:
+                if file.endswith(('.py', '.js', '.ts', '.java', '.cpp', '.c', '.go')):
+                    file_path = os.path.join(root, file)
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                            combined_code += f"\n--- FILE: {file} ---\n{content}\n"
+                            if len(combined_code) > 50000:
+                                return combined_code
+                    except Exception:
+                        continue
+        return combined_code if combined_code else "No supported source files found."
+    except Exception:
+        return "Failed to clone repository. Check URL and visibility."
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
 @app.post("/analyze")
 @limiter.limit("5/minute")
-async def analyze_code(request: Request, payload: CodeRequest):
+async def analyze_code(request: Request, payload: AnalyzeRequest):
     try:
-        static_analysis = f"SECRETS SCANNER:\n{scan_secrets(payload.code)}\n"
-        
-        if payload.language.lower() == "python":
-            static_analysis += f"BANDIT SAST:\n{run_bandit(payload.code)}\n"
+        target_code = ""
+        if payload.repo_url:
+            target_code = clone_and_read_repo(payload.repo_url)
+        else:
+            target_code = payload.code
+
+        if not target_code:
+            raise HTTPException(status_code=400, detail="No code or valid repository provided.")
+
+        static_analysis = f"SECRETS SCANNER:\n{scan_secrets(target_code)}\n"
+        if payload.language.lower() == "python" and not payload.repo_url:
+            static_analysis += f"BANDIT SAST:\n{run_bandit(target_code)}\n"
             
-        prompt_content = f"LANGUAGE: {payload.language}\nCODE:\n{payload.code}\n\nSTATIC SCANNER FINDINGS:\n{static_analysis}"
-        
+        prompt_content = f"TARGET CODE/REPO:\n{target_code}\n\nSTATIC SCANNER FINDINGS:\n{static_analysis}"
+        system_prompt = get_system_prompt(payload.paranoia_level)
+
         response = client.chat.completions.create(
             model=MODEL_ID,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt_content}
             ],
             response_format={"type": "json_object"},
@@ -119,16 +149,15 @@ async def analyze_code(request: Request, payload: CodeRequest):
         )
         
         result_text = response.choices[0].message.content
-        parsed_json = json.loads(result_text)
-        
-        return parsed_json
+        return json.loads(result_text)
 
     except json.JSONDecodeError:
         raise HTTPException(status_code=500, detail="AI response formatting error")
+    except HTTPException as he:
+        raise he
     except Exception:
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/")
-@limiter.limit("10/minute")
-def read_root(request: Request):
-    return {"status": "ok", "message": "Hybrid multi-language AppSec API is running"}
+def read_root():
+    return {"status": "ok"}
