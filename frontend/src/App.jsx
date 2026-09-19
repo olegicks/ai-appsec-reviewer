@@ -3,14 +3,25 @@ import Editor from '@monaco-editor/react';
 import './App.css';
 
 function App() {
-  const [code, setCode] = useState('// Paste your code here or select a template...\n');
+  const [code, setCode] = useState('');
+  const [language, setLanguage] = useState('python');
   const [vulnerabilities, setVulnerabilities] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const templates = {
-    sqli: `username = request.form['user']\nquery = "SELECT * FROM users WHERE username = '" + username + "'"\ncursor.execute(query)`,
-    hardcode: `def connect_to_db():\n    password = "super_secret_db_password_123"\n    db.connect(user="admin", password=password)`,
+    python_sqli: `username = request.form['user']\nquery = "SELECT * FROM users WHERE username = '" + username + "'"\ncursor.execute(query)`,
+    javascript_xss: `const userInput = new URLSearchParams(window.location.search).get('name');\ndocument.getElementById('greeting').innerHTML = "Hello, " + userInput;`,
+  };
+
+  const loadTemplate = (type) => {
+    if (type === 'python') {
+      setLanguage('python');
+      setCode(templates.python_sqli);
+    } else {
+      setLanguage('javascript');
+      setCode(templates.javascript_xss);
+    }
   };
 
   const handleAnalyze = async () => {
@@ -22,7 +33,7 @@ function App() {
       const response = await fetch('https://ai-appsec-reviewer.onrender.com/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code })
+        body: JSON.stringify({ code, language })
       });
       
       if (!response.ok) throw new Error('Server error. Please check if the backend is running.');
@@ -40,12 +51,19 @@ function App() {
     <div className="app-container">
       <header className="header">
         <h1>🛡️ AI Secure Code Reviewer</h1>
-        <p>Find vulnerabilities in your code using AI</p>
+        <p>Find vulnerabilities in your code using AI & SAST</p>
       </header>
 
       <div className="toolbar">
-        <button onClick={() => setCode(templates.sqli)}>Example: SQL Injection</button>
-        <button onClick={() => setCode(templates.hardcode)}>Example: Hardcoded Secret</button>
+        <select value={language} onChange={(e) => setLanguage(e.target.value)} className="lang-select">
+          <option value="python">Python</option>
+          <option value="javascript">JavaScript</option>
+          <option value="java">Java</option>
+          <option value="cpp">C++</option>
+        </select>
+        
+        <button onClick={() => loadTemplate('python')}>Example: Python SQLi</button>
+        <button onClick={() => loadTemplate('javascript')}>Example: JS XSS</button>
         <button className="scan-btn" onClick={handleAnalyze} disabled={loading}>
           {loading ? 'Analyzing...' : '🚀 Scan Code'}
         </button>
@@ -55,7 +73,7 @@ function App() {
         <div className="editor-section">
           <Editor
             height="60vh"
-            defaultLanguage="python"
+            language={language}
             theme="vs-dark"
             value={code}
             onChange={(value) => setCode(value)}
@@ -66,7 +84,7 @@ function App() {
         <div className="results-section">
           <h2>Analysis Results:</h2>
           
-          {loading && <div className="loader">AI is analyzing the code... 🤖</div>}
+          {loading && <div className="loader">Analyzing code via AI & SAST... 🤖</div>}
           {error && <div className="error">❌ {error}</div>}
           
           {!loading && vulnerabilities?.length === 0 && (

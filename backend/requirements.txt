@@ -4,3 +4,4 @@ openai
 pydantic
 python-dotenv
 slowapi
+bandit
