@@ -12,6 +12,21 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  const templates = {
+    python_sqli: `import sqlite3\n\ndef get_user(username):\n    conn = sqlite3.connect('db.sqlite')\n    cursor = conn.cursor()\n    # SQL Injection Vulnerability\n    cursor.execute(f"SELECT * FROM users WHERE name = '{username}'")\n    return cursor.fetchall()`,
+    javascript_xss: `const userInput = new URLSearchParams(window.location.search).get('name');\ndocument.getElementById('greeting').innerHTML = "Hello, " + userInput;`,
+    java_secret: `public class Config {\n    // Dummy config\n    private static final String AWS_KEY = "AKIAIOSFODNN7EXAMPLE";\n    private static final String DB_PASS = "super_secret_db_123";\n}`,
+    cpp_buffer: `void copyData(char *input) {\n    char buffer[10];\n    // buffer overflow risk\n    strcpy(buffer, input);\n}`
+  };
+
+  const loadTemplate = (type) => {
+    setMode('snippet');
+    if (type === 'python') { setLanguage('python'); setCode(templates.python_sqli); }
+    else if (type === 'javascript') { setLanguage('javascript'); setCode(templates.javascript_xss); }
+    else if (type === 'java') { setLanguage('java'); setCode(templates.java_secret); }
+    else if (type === 'cpp') { setLanguage('cpp'); setCode(templates.cpp_buffer); }
+  };
+
   const handleAnalyze = async () => {
     setLoading(true);
     setError(null);
@@ -21,15 +36,13 @@ function App() {
       const response = await fetch('https://ai-appsec-reviewer.onrender.com/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          code: mode === 'snippet' ? code : '',
-          language,
-          repo_url: mode === 'repo' ? repoUrl : '',
-          paranoia_level: paranoia
-        })
+        body: JSON.stringify({ mode, code, language, repo_url: repoUrl, paranoia_level: paranoia })
       });
       
-      if (!response.ok) throw new Error('Server error. Please verify backend status.');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.detail || `HTTP Error ${response.status}`);
+      }
       
       const data = await response.json();
       setVulnerabilities(data.vulnerabilities);
@@ -40,54 +53,18 @@ function App() {
     }
   };
 
-  const exportReport = () => {
-    if (!vulnerabilities) return;
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
-        <meta charset="UTF-8">
-        <title>Security Audit Report</title>
-        <style>
-          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 40px; color: #24292e; background: #f6f8fa; }
-          h1 { color: #24292e; border-bottom: 1px solid #eaecef; padding-bottom: 10px; }
-          .vuln { background: #ffffff; border: 1px solid #e1e4e8; border-left: 4px solid #d73a49; border-radius: 6px; padding: 20px; margin-bottom: 20px; }
-          .vuln h3 { margin-top: 0; color: #d73a49; }
-          pre { background: #f6f8fa; padding: 16px; border-radius: 6px; overflow-x: auto; color: #24292e; font-size: 14px; }
-        </style>
-      </head>
-      <body>
-        <h1>AppSec Security Audit Report</h1>
-        <p><strong>Scan Type:</strong> ${mode === 'repo' ? 'Repository Scan' : 'Code Snippet Scan'}</p>
-        <p><strong>Paranoia Level:</strong> ${paranoia}</p>
-        <p><strong>Date:</strong> ${new Date().toLocaleString()}</p>
-        <hr>
-        ${vulnerabilities.length === 0 ? '<p>No vulnerabilities detected.</p>' : ''}
-        ${vulnerabilities.map(v => `
-          <div class="vuln">
-            <h3>${v.vulnerability_type} (Location:${v.line_number})</h3>
-            <p><strong>Risk Explanation:</strong> ${v.risk_explanation}</p>
-            <p><strong>Remediation:</strong></p>
-            <pre>${v.secure_code_snippet}</pre>
-          </div>
-        `).join('')}
-      </body>
-      </html>
-    `;
-    const blob = new Blob([htmlContent], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'appsec_audit_report.html';
-    a.click();
-    URL.revokeObjectURL(url);
+  const getSeverityClass = (sev) => {
+    const s = sev.toLowerCase();
+    if (s === 'critical' || s === 'high') return 'sev-high';
+    if (s === 'medium') return 'sev-med';
+    return 'sev-low';
   };
 
   return (
     <div className="app-container">
       <header className="header">
-        <h1>AppSec Code Reviewer</h1>
-        <p>Enterprise-grade SAST and AI hybrid analysis</p>
+        <h1>🛡️ AppSec Code Reviewer</h1>
+        <p>Advanced SAST and AI hybrid analysis pipeline</p>
       </header>
 
       <div className="controls-panel">
@@ -114,7 +91,7 @@ function App() {
         <div className="config-group">
           <label>Paranoia Level:</label>
           <select value={paranoia} onChange={(e) => setParanoia(e.target.value)}>
-            <option value="standard">Standard (Critical Risks)</option>
+            <option value="standard">Standard (Exploitable only)</option>
             <option value="aggressive">Aggressive (All Warnings)</option>
           </select>
         </div>
@@ -124,6 +101,15 @@ function App() {
         </button>
       </div>
 
+      {mode === 'snippet' && (
+        <div className="example-buttons">
+          <button className="btn secondary outline" onClick={() => loadTemplate('python')}>SQLi (Py)</button>
+          <button className="btn secondary outline" onClick={() => loadTemplate('javascript')}>XSS (JS)</button>
+          <button className="btn secondary outline" onClick={() => loadTemplate('java')}>Secrets (Java)</button>
+          <button className="btn secondary outline" onClick={() => loadTemplate('cpp')}>Buffer (C++)</button>
+        </div>
+      )}
+
       <div className="main-content">
         <div className="input-section">
           {mode === 'repo' ? (
@@ -131,12 +117,12 @@ function App() {
               <h3>Target Repository</h3>
               <input 
                 type="text" 
-                placeholder="https://github.com/username/repo" 
+                placeholder="https://github.com/owner/repo" 
                 value={repoUrl}
                 onChange={(e) => setRepoUrl(e.target.value)}
                 className="repo-input"
               />
-              <p className="helper-text">Only public repositories are supported. Scans primary branch source files.</p>
+              <p className="helper-text">Only public GitHub repositories. Limited to 20 files (max 30KB each).</p>
             </div>
           ) : (
             <Editor
@@ -153,29 +139,35 @@ function App() {
         <div className="results-section">
           <div className="results-header">
             <h2>Audit Findings</h2>
-            {vulnerabilities && (
-              <button className="btn secondary" onClick={exportReport}>Export HTML Report</button>
-            )}
           </div>
           
           <div className="results-body">
-            {loading && <div className="status-message">Initializing security analysis...</div>}
-            {error && <div className="status-message error">{error}</div>}
+            {loading && <div className="status-message">Executing hybrid pipeline...</div>}
+            {error && <div className="status-message error">❌ {error}</div>}
             
             {!loading && vulnerabilities?.length === 0 && (
-              <div className="status-message success">Zero vulnerabilities detected. Code passes standard baseline.</div>
+              <div className="status-message success">✅ Zero vulnerabilities detected. Code passes security baseline.</div>
             )}
 
             {!loading && vulnerabilities?.map((vuln, index) => (
               <div key={index} className="vuln-card">
                 <div className="vuln-card-header">
-                  <h3>{vuln.vulnerability_type}</h3>
-                  <span className="badge">Location: {vuln.line_number}</span>
+                  <div className="vuln-title">
+                    <span className={`severity-badge ${getSeverityClass(vuln.severity)}`}>{vuln.severity}</span>
+                    <h3>{vuln.vulnerability}</h3>
+                  </div>
+                  <span className="badge-file">{vuln.file} : {vuln.line}</span>
+                </div>
+                <div className="vuln-card-meta">
+                  <span><strong>CWE:</strong> {vuln.cwe}</span>
+                  <span><strong>OWASP:</strong> {vuln.owasp}</span>
+                  <span><strong>Confidence:</strong> {vuln.confidence}</span>
+                  <span><strong>Source:</strong> {vuln.source}</span>
                 </div>
                 <div className="vuln-card-body">
                   <p className="risk-text">{vuln.risk_explanation}</p>
                   <div className="code-block">
-                    <span className="code-label">Remediation</span>
+                    <span className="code-label">Remediation Snippet</span>
                     <pre>{vuln.secure_code_snippet}</pre>
                   </div>
                 </div>
