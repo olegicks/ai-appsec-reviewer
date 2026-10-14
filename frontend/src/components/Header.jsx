@@ -1,13 +1,6 @@
 import { GithubIcon, ShieldIcon } from './Icons';
 
-const STATUS_LABEL = {
-  checking: 'Connecting',
-  online: 'API online',
-  waking: 'Waking server',
-  offline: 'API offline',
-};
-
-export default function Header({ apiStatus }) {
+export default function Header() {
   return (
     <header className="header">
       <div className="brand">
@@ -23,10 +16,6 @@ export default function Header({ apiStatus }) {
       </div>
 
       <div className="header-actions">
-        <span className={`status-pill status-${apiStatus}`} role="status">
-          <span className="status-dot" />
-          {STATUS_LABEL[apiStatus]}
-        </span>
         <a
           className="icon-link"
           href="https://github.com/olegicks/ai-appsec-reviewer"

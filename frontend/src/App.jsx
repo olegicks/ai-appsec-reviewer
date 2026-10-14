@@ -25,26 +25,13 @@ function defineEditorTheme(monaco) {
   });
 }
 
-function useApiStatus() {
-  const [status, setStatus] = useState('checking');
-
+// Render's free tier sleeps when idle: ping it silently on load so it is warm by the first scan.
+function useWarmUpApi() {
   useEffect(() => {
     const controller = new AbortController();
-    // Render's free tier sleeps; flag it as "waking" if the first ping is slow.
-    const slow = setTimeout(() => setStatus((s) => (s === 'checking' ? 'waking' : s)), 2500);
-    checkHealth({ signal: controller.signal })
-      .then(() => setStatus('online'))
-      .catch((err) => {
-        if (err.name !== 'AbortError') setStatus('offline');
-      })
-      .finally(() => clearTimeout(slow));
-    return () => {
-      clearTimeout(slow);
-      controller.abort();
-    };
+    checkHealth({ signal: controller.signal }).catch(() => {});
+    return () => controller.abort();
   }, []);
-
-  return [status, setStatus];
 }
 
 function App() {
@@ -57,8 +44,8 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [runId, setRunId] = useState(0);
-  const [apiStatus, setApiStatus] = useApiStatus();
   const controllerRef = useRef(null);
+  useWarmUpApi();
 
   const target = mode === 'repo' ? repoUrl : `snippet.${LANGUAGES.find((l) => l.value === language)?.ext}`;
 
@@ -86,14 +73,13 @@ function App() {
         { signal: controller.signal },
       );
       setResult(data);
-      setApiStatus('online');
     } catch (err) {
       if (err.name !== 'AbortError') setError(err.message);
     } finally {
       controllerRef.current = null;
       setLoading(false);
     }
-  }, [mode, code, language, repoUrl, paranoia, setApiStatus]);
+  }, [mode, code, language, repoUrl, paranoia]);
 
   const cancelAnalysis = () => controllerRef.current?.abort();
 
@@ -132,7 +118,7 @@ function App() {
       <div className="bg-grid" aria-hidden="true" />
       <div className="bg-glow" aria-hidden="true" />
 
-      <Header apiStatus={apiStatus} />
+      <Header />
 
       <Toolbar
         mode={mode}

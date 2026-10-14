@@ -18,7 +18,7 @@
 ![Analysis results](docs/screenshots/analysis-results.png)
 
 > [!NOTE]
-> The backend runs on Render's free tier and sleeps when idle. The status pill in the header shows **Waking server** while it starts, which takes about 30 seconds.
+> The backend runs on Render's free tier and sleeps when idle. The app pings it on page load so it starts waking up early, but the first scan can still take about 30 seconds.
 
 ---
 

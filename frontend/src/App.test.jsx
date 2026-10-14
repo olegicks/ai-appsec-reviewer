@@ -46,12 +46,13 @@ describe('App', () => {
     vi.useRealTimers();
   });
 
-  it('renders the empty state and reports API status', async () => {
-    mockApi();
+  it('renders the empty state and silently warms up the API', async () => {
+    const fetchSpy = mockApi();
     render(<App />);
 
     expect(screen.getByText('Ready to scan')).toBeInTheDocument();
-    expect(await screen.findByText('API online')).toBeInTheDocument();
+    await waitFor(() => expect(fetchSpy.mock.calls.some(([url]) => url.endsWith('/health'))).toBe(true));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
   it('runs an analysis and renders findings sorted by severity', async () => {
