@@ -35,6 +35,19 @@ def make_finding(**overrides):
 
 
 @pytest.fixture(autouse=True)
+def no_osv_network(monkeypatch):
+    """Tests never reach OSV.dev: any unmocked dependency lookup sees a connection error."""
+    import httpx
+
+    from reviewer import osv
+
+    def offline(request):
+        raise httpx.ConnectError("network disabled in tests", request=request)
+
+    monkeypatch.setattr(osv, "_make_client", lambda: httpx.Client(transport=httpx.MockTransport(offline)))
+
+
+@pytest.fixture(autouse=True)
 def reset_rate_limiter():
     main.limiter.reset()
     yield

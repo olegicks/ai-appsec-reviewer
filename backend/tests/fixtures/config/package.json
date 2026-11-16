@@ -1,0 +1,11 @@
+{
+  "name": "hmi-frontend",
+  "dependencies": {
+    "lodash": "4.17.15",
+    "express": "^4.17.1",
+    "left-pad": "latest"
+  },
+  "devDependencies": {
+    "vite": "~5.0.0"
+  }
+}

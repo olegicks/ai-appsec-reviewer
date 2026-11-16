@@ -1,0 +1,7 @@
+FROM python:latest
+ARG GITHUB_TOKEN
+ENV DB_PASSWORD=SuperSecret123
+ADD https://example.com/agent.tar.gz /opt/agent.tar.gz
+RUN curl -fsSL https://get.example.com/install.sh | sh
+COPY . /app
+CMD ["python", "/app/main.py"]

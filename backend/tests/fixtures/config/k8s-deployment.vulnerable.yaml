@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: substation-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      hostNetwork: true
+      containers:
+        - name: gateway
+          image: example/gateway:latest
+          securityContext:
+            privileged: true
+            allowPrivilegeEscalation: true
+            runAsNonRoot: false

@@ -1,0 +1,5 @@
+requests==2.19.0
+flask>=2.0.0
+pyyaml
+django~=3.2.0  # LTS line
+-e git+https://github.com/example/lib.git#egg=lib

@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16.4
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+secrets:
+  db_password:
+    file: ./db_password.txt
