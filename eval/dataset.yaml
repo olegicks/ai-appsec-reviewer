@@ -1,0 +1,128 @@
+# Ground truth for the evaluation harness (python -m eval.run).
+#
+# Every sample is either vulnerable (expected findings listed) or safe (expected: []).
+# A prediction matches an expected finding when it is in the same file, within LINE_TOLERANCE lines and
+# either has the same rule id or one of the listed CWEs. Unmatched predictions count as false positives.
+# Paths are relative to the repository root.
+
+samples:
+  # --- OT / ICS rule pack (one vulnerable + one safe sample per rule) ---------------------------
+  - {id: ot-001-vuln, category: ot, path: backend/tests/fixtures/ot/OT-001_vulnerable.py,
+     expected: [{line: 7, rule: OT-001, cwe: [CWE-319]}]}
+  - {id: ot-001-safe, category: ot, path: backend/tests/fixtures/ot/OT-001_safe.py, expected: []}
+  - {id: ot-002-vuln, category: ot, path: backend/tests/fixtures/ot/OT-002_vulnerable.py,
+     expected: [{line: 3, rule: OT-002, cwe: [CWE-20]}]}
+  - {id: ot-002-safe, category: ot, path: backend/tests/fixtures/ot/OT-002_safe.py, expected: []}
+  - {id: ot-003-vuln, category: ot, path: backend/tests/fixtures/ot/OT-003_vulnerable.py,
+     expected: [{line: 5, rule: OT-003, cwe: [CWE-319]}]}
+  - {id: ot-003-safe, category: ot, path: backend/tests/fixtures/ot/OT-003_safe.py, expected: []}
+  - {id: ot-004-vuln, category: ot, path: backend/tests/fixtures/ot/OT-004_vulnerable.py,
+     expected: [{line: 5, rule: OT-004, cwe: [CWE-319]}]}
+  - {id: ot-004-safe, category: ot, path: backend/tests/fixtures/ot/OT-004_safe.py, expected: []}
+  - {id: ot-005-vuln, category: ot, path: backend/tests/fixtures/ot/OT-005_vulnerable.py,
+     expected: [{line: 4, rule: OT-005, cwe: [CWE-319, CWE-306]}, {line: 5, rule: OT-005, cwe: [CWE-319]}]}
+  - {id: ot-005-safe, category: ot, path: backend/tests/fixtures/ot/OT-005_safe.py, expected: []}
+  - {id: ot-006-vuln, category: ot, path: backend/tests/fixtures/ot/OT-006_vulnerable.py,
+     expected: [{line: 5, rule: OT-006, cwe: [CWE-319]}]}
+  - {id: ot-006-safe, category: ot, path: backend/tests/fixtures/ot/OT-006_safe.py, expected: []}
+  - {id: ot-007-vuln, category: ot, path: backend/tests/fixtures/ot/OT-007_vulnerable.py,
+     expected: [{line: 8, rule: OT-007, cwe: [CWE-1051, CWE-547]}]}
+  - {id: ot-007-safe, category: ot, path: backend/tests/fixtures/ot/OT-007_safe.py, expected: []}
+  - {id: ot-008-vuln, category: ot, path: backend/tests/fixtures/ot/OT-008_vulnerable.py,
+     expected: [{line: 6, rule: OT-008, cwe: [CWE-1392, CWE-798, CWE-259]}]}
+  - {id: ot-008-safe, category: ot, path: backend/tests/fixtures/ot/OT-008_safe.py, expected: []}
+  - {id: ot-009-vuln, category: ot, path: backend/tests/fixtures/ot/OT-009_vulnerable.py,
+     expected: [{line: 5, rule: OT-009, cwe: [CWE-295]}]}
+  - {id: ot-009-safe, category: ot, path: backend/tests/fixtures/ot/OT-009_safe.py, expected: []}
+  - {id: ot-010-vuln, category: ot, path: backend/tests/fixtures/ot/OT-010_vulnerable.py,
+     expected: [{line: 5, rule: OT-010, cwe: [CWE-1088, CWE-400]}]}
+  - {id: ot-010-safe, category: ot, path: backend/tests/fixtures/ot/OT-010_safe.py, expected: []}
+  - id: ot-smart-grid
+    category: ot
+    path: backend/tests/fixtures/ot/smart_grid_gateway.py
+    expected:
+      - {line: 14, rule: OT-008, cwe: [CWE-1392, CWE-798]}
+      - {line: 16, rule: OT-001, cwe: [CWE-319]}
+      - {line: 16, rule: OT-007, cwe: [CWE-1051]}
+      - {line: 16, rule: OT-010, cwe: [CWE-1088]}
+      - {line: 22, rule: OT-002, cwe: [CWE-20]}
+      - {line: 26, rule: OT-009, cwe: [CWE-295]}
+      - {line: 30, rule: OT-006, cwe: [CWE-319]}
+      - {line: 30, rule: OT-010, cwe: [CWE-1088]}
+      - {line: 36, rule: OT-005, cwe: [CWE-319, CWE-306]}
+      - {line: 37, rule: OT-005, cwe: [CWE-319]}
+
+  # --- Container and deployment configuration ------------------------------------------------
+  - id: docker-vuln
+    category: config
+    path: backend/tests/fixtures/config/Dockerfile.vulnerable
+    expected:
+      - {line: 1, rule: DOCKER-001, cwe: [CWE-250]}
+      - {line: 1, rule: DOCKER-002, cwe: [CWE-1357]}
+      - {line: 2, rule: DOCKER-004, cwe: [CWE-798]}
+      - {line: 3, rule: DOCKER-004, cwe: [CWE-798]}
+      - {line: 4, rule: DOCKER-003, cwe: [CWE-494]}
+      - {line: 5, rule: DOCKER-005, cwe: [CWE-494]}
+  - {id: docker-safe, category: config, path: backend/tests/fixtures/config/Dockerfile.safe, expected: []}
+  - id: compose-vuln
+    category: config
+    path: backend/tests/fixtures/config/docker-compose.vulnerable.yml
+    expected:
+      - {line: 2, rule: COMPOSE-005, cwe: [CWE-703]}
+      - {line: 5, rule: COMPOSE-003, cwe: [CWE-668]}
+      - {line: 7, cwe: [CWE-798]}
+      - {line: 10, rule: COMPOSE-001, cwe: [CWE-250]}
+      - {line: 11, rule: COMPOSE-002, cwe: [CWE-668]}
+      - {line: 13, rule: COMPOSE-004, cwe: [CWE-250]}
+  - {id: compose-safe, category: config, path: backend/tests/fixtures/config/docker-compose.safe.yml, expected: []}
+  - id: k8s-vuln
+    category: config
+    path: backend/tests/fixtures/config/k8s-deployment.vulnerable.yaml
+    expected:
+      - {line: 15, rule: K8S-004, cwe: [CWE-668]}
+      - {line: 17, rule: K8S-005, cwe: [CWE-770]}
+      - {line: 18, rule: K8S-006, cwe: [CWE-1357]}
+      - {line: 20, rule: K8S-001, cwe: [CWE-250]}
+      - {line: 21, rule: K8S-003, cwe: [CWE-269]}
+      - {line: 22, rule: K8S-002, cwe: [CWE-250]}
+  - {id: k8s-safe, category: config, path: backend/tests/fixtures/config/k8s-deployment.safe.yaml, expected: []}
+
+  # --- Classic application security, across the supported languages ----------------------------
+  - {id: py-sqli-vuln, category: appsec, path: eval/samples/appsec/py_sqli_vulnerable.py,
+     expected: [{line: 12, cwe: [CWE-89]}]}
+  - {id: py-sqli-safe, category: appsec, path: eval/samples/appsec/py_sqli_safe.py, expected: []}
+  - {id: py-cmd-vuln, category: appsec, path: eval/samples/appsec/py_cmd_vulnerable.py,
+     expected: [{line: 11, cwe: [CWE-78, CWE-77]}]}
+  - {id: py-cmd-safe, category: appsec, path: eval/samples/appsec/py_cmd_safe.py, expected: []}
+  - {id: py-pickle-vuln, category: appsec, path: eval/samples/appsec/py_pickle_vulnerable.py,
+     expected: [{line: 12, cwe: [CWE-502]}]}
+  - {id: py-pickle-safe, category: appsec, path: eval/samples/appsec/py_pickle_safe.py, expected: []}
+  - {id: py-yaml-vuln, category: appsec, path: eval/samples/appsec/py_yaml_vulnerable.py,
+     expected: [{line: 5, cwe: [CWE-502, CWE-20]}]}
+  - {id: py-yaml-safe, category: appsec, path: eval/samples/appsec/py_yaml_safe.py, expected: []}
+  - {id: py-path-vuln, category: appsec, path: eval/samples/appsec/py_path_vulnerable.py,
+     expected: [{line: 13, cwe: [CWE-22, CWE-73]}]}
+  - {id: py-path-safe, category: appsec, path: eval/samples/appsec/py_path_safe.py, expected: []}
+  - {id: js-xss-vuln, category: appsec, path: eval/samples/appsec/js_xss_vulnerable.js,
+     expected: [{line: 4, cwe: [CWE-79]}]}
+  - {id: js-xss-safe, category: appsec, path: eval/samples/appsec/js_xss_safe.js, expected: []}
+  - {id: js-eval-vuln, category: appsec, path: eval/samples/appsec/js_eval_vulnerable.js,
+     expected: [{line: 5, cwe: [CWE-95, CWE-94]}]}
+  - {id: js-eval-safe, category: appsec, path: eval/samples/appsec/js_eval_safe.js, expected: []}
+  - {id: java-sqli-vuln, category: appsec, path: eval/samples/appsec/JavaSqliVulnerable.java,
+     expected: [{line: 6, cwe: [CWE-89]}]}
+  - {id: java-sqli-safe, category: appsec, path: eval/samples/appsec/JavaSqliSafe.java, expected: []}
+  - {id: cpp-overflow-vuln, category: appsec, path: eval/samples/appsec/cpp_overflow_vulnerable.cpp,
+     expected: [{line: 5, cwe: [CWE-120, CWE-121, CWE-787]}]}
+  - {id: cpp-overflow-safe, category: appsec, path: eval/samples/appsec/cpp_overflow_safe.cpp, expected: []}
+  - {id: go-cmd-vuln, category: appsec, path: eval/samples/appsec/go_cmd_vulnerable.go,
+     expected: [{line: 10, cwe: [CWE-78, CWE-77]}]}
+  - {id: go-cmd-safe, category: appsec, path: eval/samples/appsec/go_cmd_safe.go, expected: []}
+
+  # --- Hardcoded secrets ----------------------------------------------------------------------
+  - {id: py-aws-key-vuln, category: secrets, path: eval/samples/secrets/py_aws_key_vulnerable.py,
+     expected: [{line: 3, cwe: [CWE-798]}]}
+  - {id: py-aws-key-safe, category: secrets, path: eval/samples/secrets/py_aws_key_safe.py, expected: []}
+  - {id: js-token-vuln, category: secrets, path: eval/samples/secrets/js_token_vulnerable.js,
+     expected: [{line: 2, cwe: [CWE-798]}]}
+  - {id: js-token-safe, category: secrets, path: eval/samples/secrets/js_token_safe.js, expected: []}
