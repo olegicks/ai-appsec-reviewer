@@ -7,6 +7,8 @@ os.environ["OPENAI_MODEL"] = "test-model"
 os.environ.pop("OPENAI_TEMPERATURE", None)
 os.environ["FRONTEND_URL"] = "http://localhost:5173"
 os.environ.pop("RATE_LIMIT", None)
+# The OSV client is exercised with mocks; real network access is blocked by the no_osv_network fixture.
+os.environ["OSV_ENABLED"] = "true"
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
