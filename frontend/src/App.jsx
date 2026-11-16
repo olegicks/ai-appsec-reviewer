@@ -1,57 +1,64 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Editor from '@monaco-editor/react';
-import Header from './components/Header';
-import RepoPanel from './components/RepoPanel';
-import ResultsPanel from './components/ResultsPanel';
-import Toolbar from './components/Toolbar';
+import ComplianceView from './components/ComplianceView';
+import EvaluationView from './components/EvaluationView';
+import PageHeader from './components/PageHeader';
+import ReportView from './components/ReportView';
+import ResultsView from './components/ResultsView';
+import RiskView from './components/RiskView';
+import ScanView from './components/ScanView';
+import Sidebar from './components/Sidebar';
 import { EXAMPLES, LANGUAGES } from './data/examples';
-import { analyze, checkHealth } from './lib/api';
+import { analyze, checkHealth, requestReport } from './lib/api';
+import { buildAssessment, renderAssessmentHtml, renderAssessmentMarkdown } from './lib/assessment';
+import { EMPTY_FILTERS } from './lib/filters';
+import { useTheme } from './lib/hooks';
 import { buildHtmlReport, downloadFile } from './lib/report';
+import { VIEWS } from './lib/ui';
 import './App.css';
 
-function defineEditorTheme(monaco) {
-  monaco.editor.defineTheme('appsec-dark', {
-    base: 'vs-dark',
-    inherit: true,
-    rules: [{ token: 'comment', foreground: '64748b', fontStyle: 'italic' }],
-    colors: {
-      'editor.background': '#0a1120',
-      'editor.lineHighlightBackground': '#111c33',
-      'editorLineNumber.foreground': '#334155',
-      'editorLineNumber.activeForeground': '#94a3b8',
-      'editor.selectionBackground': '#1e3a5f',
-      'editorCursor.foreground': '#38bdf8',
-    },
-  });
-}
+const IDLE_NARRATIVE = { status: 'idle', data: null, error: null };
 
 // Render's free tier sleeps when idle: ping it silently on load so it is warm by the first scan.
 function useWarmUpApi() {
+  const [warm, setWarm] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
-    checkHealth({ signal: controller.signal }).catch(() => {});
+    checkHealth({ signal: controller.signal })
+      .then(() => setWarm(true))
+      .catch(() => {});
     return () => controller.abort();
   }, []);
+  return [warm, setWarm];
 }
 
 function App() {
+  const [view, setView] = useState('scan');
   const [mode, setMode] = useState('snippet');
   const [code, setCode] = useState(EXAMPLES[0].code);
-  const [repoUrl, setRepoUrl] = useState('');
   const [language, setLanguage] = useState(EXAMPLES[0].language);
+  const [repoUrl, setRepoUrl] = useState('');
   const [paranoia, setParanoia] = useState('standard');
   const [result, setResult] = useState(null);
+  const [scan, setScan] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [runId, setRunId] = useState(0);
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [focusId, setFocusId] = useState(null);
+  const [narrative, setNarrative] = useState(IDLE_NARRATIVE);
+  const [theme, toggleTheme] = useTheme();
+  const [serverWarm, setServerWarm] = useWarmUpApi();
   const controllerRef = useRef(null);
-  useWarmUpApi();
 
-  const target = mode === 'repo' ? repoUrl : `snippet.${LANGUAGES.find((l) => l.value === language)?.ext}`;
+  const target =
+    mode === 'repo'
+      ? repoUrl.trim()
+      : mode === 'config'
+        ? 'configuration snippet'
+        : `snippet.${LANGUAGES.find((l) => l.value === language)?.ext}`;
 
   const runAnalysis = useCallback(async () => {
     if (controllerRef.current) return;
-    if (mode === 'snippet' && code.trim().length < 5) {
+    if (mode !== 'repo' && code.trim().length < 5) {
       setError({ message: 'Paste at least a few lines of code to analyze.' });
       return;
     }
@@ -65,21 +72,32 @@ function App() {
     setLoading(true);
     setError(null);
     setResult(null);
-    setRunId((id) => id + 1);
+    setNarrative(IDLE_NARRATIVE);
+    setFilters(EMPTY_FILTERS);
+    setFocusId(null);
 
     try {
       const data = await analyze(
-        { mode, code, language, repo_url: repoUrl.trim(), paranoia_level: paranoia },
+        {
+          mode: mode === 'repo' ? 'repo' : 'snippet',
+          code,
+          language: mode === 'config' ? 'config' : language,
+          repo_url: repoUrl.trim(),
+          paranoia_level: paranoia,
+        },
         { signal: controller.signal },
       );
       setResult(data);
+      setScan({ target, meta: data.meta, finishedAt: new Date() });
+      setServerWarm(true);
+      setView('results');
     } catch (err) {
       if (err.name !== 'AbortError') setError({ message: err.message, code: err.code });
     } finally {
       controllerRef.current = null;
       setLoading(false);
     }
-  }, [mode, code, language, repoUrl, paranoia]);
+  }, [mode, code, language, repoUrl, paranoia, target, setServerWarm]);
 
   const cancelAnalysis = () => controllerRef.current?.abort();
 
@@ -94,92 +112,134 @@ function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [runAnalysis]);
 
+  const loadNarrative = useCallback(async () => {
+    if (!result) return;
+    setNarrative({ status: 'loading', data: null, error: null });
+    try {
+      const data = await requestReport(scan?.target || target, result);
+      setNarrative({ status: 'ready', data, error: null });
+    } catch (err) {
+      setNarrative({ status: 'error', data: null, error: err.message });
+    }
+  }, [result, scan, target]);
+
+  const navigate = (id) => {
+    setFocusId(null);
+    setView(id);
+    // The report summary is requested once per scan, when the Report view is first opened.
+    if (id === 'report' && result && narrative.status === 'idle') loadNarrative();
+  };
+
   const loadExample = (example) => {
-    setMode('snippet');
-    setLanguage(example.language);
+    if (example.language === 'config') {
+      setMode('config');
+    } else {
+      setMode('snippet');
+      setLanguage(example.language);
+    }
     setCode(example.code);
-    setResult(null);
     setError(null);
   };
 
-  const exportReport = (format) => {
+  const openFinding = (id) => {
+    setFilters(EMPTY_FILTERS);
+    setFocusId(id);
+    setView('results');
+  };
+
+  const selectCell = (cell) => {
+    setFilters({ ...EMPTY_FILTERS, cell: { likelihood: cell.likelihood, impact: cell.impact } });
+    setFocusId(null);
+    setView('results');
+  };
+
+  const exportFile = (kind) => {
     if (!result) return;
+    const name = scan?.target || target;
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-    if (format === 'json') {
-      downloadFile(`security-report-${stamp}.json`, JSON.stringify({ target, ...result }, null, 2), 'application/json');
-    } else {
-      const html = buildHtmlReport({ findings: result.vulnerabilities, target, meta: result.meta });
-      downloadFile(`security-report-${stamp}.html`, html, 'text/html');
+    if (kind === 'findings-json') {
+      downloadFile(`findings-${stamp}.json`, JSON.stringify({ target: name, ...result }, null, 2), 'application/json');
+      return;
+    }
+    if (kind === 'findings-html') {
+      const html = buildHtmlReport({ findings: result.vulnerabilities, target: name, meta: result.meta });
+      downloadFile(`findings-${stamp}.html`, html, 'text/html');
+      return;
+    }
+    const model = buildAssessment({ result, narrative: narrative.data, target: name });
+    if (kind === 'report-html') downloadFile(`security-assessment-${stamp}.html`, renderAssessmentHtml(model), 'text/html');
+    if (kind === 'report-md') downloadFile(`security-assessment-${stamp}.md`, renderAssessmentMarkdown(model), 'text/markdown');
+    if (kind === 'report-json') {
+      const json = { target: name, generated_at: new Date().toISOString(), narrative: narrative.data, result };
+      downloadFile(`security-assessment-${stamp}.json`, JSON.stringify(json, null, 2), 'application/json');
     }
   };
 
   return (
-    <div className="app">
-      <div className="bg-grid" aria-hidden="true" />
-      <div className="bg-glow" aria-hidden="true" />
-
-      <Header />
-
-      <Toolbar
-        mode={mode}
-        onModeChange={setMode}
-        language={language}
-        onLanguageChange={setLanguage}
-        paranoia={paranoia}
-        onParanoiaChange={setParanoia}
-        onExample={loadExample}
-        loading={loading}
-        onRun={runAnalysis}
-        onCancel={cancelAnalysis}
+    <div className="shell">
+      <Sidebar
+        view={view}
+        onNavigate={navigate}
+        findingCount={result ? result.vulnerabilities.length : null}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
-
-      <main className="workspace">
-        <section className={`panel editor-panel ${loading ? 'scanning' : ''}`} aria-label="Scan target">
-          <div className="panel-head">
-            <div className="tab">
-              <span className={`lang-dot lang-${mode === 'repo' ? 'repo' : language}`} />
-              {mode === 'repo' ? 'repository' : target}
-            </div>
-            {mode === 'snippet' && <span className="meta-line">{code.split('\n').length} lines</span>}
-          </div>
-          <div className="panel-body editor-body">
-            {mode === 'repo' ? (
-              <RepoPanel repoUrl={repoUrl} onChange={setRepoUrl} onSubmit={runAnalysis} />
-            ) : (
-              <Editor
-                height="100%"
-                language={language}
-                theme="appsec-dark"
-                beforeMount={defineEditorTheme}
-                value={code}
-                onChange={(value) => setCode(value ?? '')}
-                loading={<div className="editor-loading">Loading editor…</div>}
-                options={{
-                  minimap: { enabled: false },
-                  fontSize: 14,
-                  fontFamily: "'JetBrains Mono', ui-monospace, Consolas, monospace",
-                  fontLigatures: true,
-                  padding: { top: 16 },
-                  scrollBeyondLastLine: false,
-                  smoothScrolling: true,
-                  cursorBlinking: 'smooth',
-                  renderLineHighlight: 'gutter',
-                }}
-              />
-            )}
-            {loading && <div className="scan-line" aria-hidden="true" />}
-          </div>
-        </section>
-
-        <ResultsPanel
-          key={runId}
-          mode={mode}
-          loading={loading}
-          error={error}
-          result={result}
-          onExport={exportReport}
-        />
-      </main>
+      <div className="main">
+        <PageHeader title={VIEWS.find((v) => v.id === view)?.label} view={view} scan={scan} />
+        <main className="content" key={view}>
+          {view === 'scan' && (
+            <ScanView
+              mode={mode}
+              onModeChange={setMode}
+              code={code}
+              onCodeChange={setCode}
+              language={language}
+              onLanguageChange={setLanguage}
+              repoUrl={repoUrl}
+              onRepoUrlChange={setRepoUrl}
+              paranoia={paranoia}
+              onParanoiaChange={setParanoia}
+              onExample={loadExample}
+              loading={loading}
+              error={error}
+              result={result}
+              serverWarm={serverWarm}
+              onRun={runAnalysis}
+              onCancel={cancelAnalysis}
+              theme={theme}
+              onViewResults={() => navigate('results')}
+            />
+          )}
+          {view === 'results' && (
+            <ResultsView
+              result={result}
+              loading={loading}
+              filters={filters}
+              onFiltersChange={setFilters}
+              focusId={focusId}
+              onExport={exportFile}
+              onNavigate={navigate}
+            />
+          )}
+          {view === 'risk' && (
+            <RiskView result={result} loading={loading} onSelectCell={selectCell} onOpenFinding={openFinding} onNavigate={navigate} />
+          )}
+          {view === 'compliance' && (
+            <ComplianceView result={result} loading={loading} onOpenFinding={openFinding} onNavigate={navigate} />
+          )}
+          {view === 'report' && (
+            <ReportView
+              result={result}
+              target={scan?.target || target}
+              narrative={narrative}
+              onRetryNarrative={loadNarrative}
+              onExport={exportFile}
+              onNavigate={navigate}
+            />
+          )}
+          {view === 'evaluation' && <EvaluationView />}
+        </main>
+      </div>
     </div>
   );
 }
