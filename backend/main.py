@@ -11,7 +11,8 @@ from slowapi.util import get_remote_address
 from reviewer.config import settings
 from reviewer.llm import LLMError, run_ai_analysis
 from reviewer.pipeline import PipelineError, build_repository_context, build_snippet_context
-from reviewer.schemas import SEVERITIES, AnalyzeRequest, AnalyzeResponse, ScanMeta
+from reviewer.analysis import build_findings, build_response
+from reviewer.schemas import AnalyzeRequest, AnalyzeResponse
 
 __version__ = "2.0.0"
 
@@ -54,14 +55,6 @@ async def pipeline_error_handler(_request: Request, exc):
     return JSONResponse(status_code=exc.status_code, content=content)
 
 
-def summarize(vulnerabilities) -> dict:
-    summary = {s: 0 for s in SEVERITIES}
-    for v in vulnerabilities:
-        summary[v.severity] = summary.get(v.severity, 0) + 1
-    summary["TOTAL"] = len(vulnerabilities)
-    return summary
-
-
 # A plain `def` endpoint runs in FastAPI's threadpool, so the blocking git/bandit/OpenAI
 # calls below no longer stall the event loop for other requests.
 @app.post("/analyze", response_model=AnalyzeResponse)
@@ -76,24 +69,22 @@ def analyze_code(request: Request, payload: AnalyzeRequest):
             raise HTTPException(status_code=400, detail="Code snippet is empty or too short.")
         ctx = build_snippet_context(payload.code, payload.language)
 
-    result = run_ai_analysis(ctx.text, payload.paranoia_level)
+    # Without a configured AI engine the deterministic engines still produce a full result.
+    ai_ready = bool(settings.openai_api_key and settings.model_id)
+    ai_result = run_ai_analysis(ctx.text, payload.paranoia_level) if ai_ready else None
+    findings = build_findings(ctx, ai_result, payload.paranoia_level)
     duration_ms = int((time.perf_counter() - started) * 1000)
-    logger.info("scan mode=%s files=%d findings=%d %dms", payload.mode, ctx.files_scanned,
-                len(result.vulnerabilities), duration_ms)
+    logger.info("scan mode=%s files=%d findings=%d ai=%s %dms", payload.mode, ctx.files_scanned,
+                len(findings), ai_ready, duration_ms)
 
-    return AnalyzeResponse(
-        vulnerabilities=result.vulnerabilities,
-        summary=summarize(result.vulnerabilities),
-        meta=ScanMeta(
-            mode=payload.mode,
-            model=settings.model_id,
-            paranoia_level=payload.paranoia_level,
-            files_scanned=ctx.files_scanned,
-            secrets_found=ctx.secrets_found,
-            sast_findings=ctx.sast_findings,
-            truncated=ctx.truncated,
-            duration_ms=duration_ms,
-        ),
+    return build_response(
+        ctx,
+        findings,
+        mode=payload.mode,
+        paranoia=payload.paranoia_level,
+        model=settings.model_id,
+        ai_status="used" if ai_ready else "not_configured",
+        duration_ms=duration_ms,
     )
 
 
