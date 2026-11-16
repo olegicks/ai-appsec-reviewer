@@ -44,6 +44,7 @@ def run_bandit_on_file(filepath: str, rel_path: str) -> Tuple[str, List[dict]]:
             "filename": rel_path,
             "line_number": f.get("line_number"),
             "test_id": f.get("test_id"),
+            "test_name": f.get("test_name"),
             "issue_text": f.get("issue_text"),
             "issue_severity": f.get("issue_severity"),
             "issue_confidence": f.get("issue_confidence"),

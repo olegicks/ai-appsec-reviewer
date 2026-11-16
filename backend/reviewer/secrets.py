@@ -42,7 +42,9 @@ def scan_and_redact_secrets(code: str, filename: str) -> Tuple[str, List[SecretF
     def _redact_key(match: re.Match) -> str:
         line = code.count("\n", 0, match.start()) + 1
         findings.append(SecretFinding(filename, line, "Private Key"))
-        return "-----BEGIN PRIVATE KEY-----" + REDACTED + "-----END PRIVATE KEY-----"
+        # Keep the original number of lines so later line numbers stay correct.
+        newlines = "\n" * match.group().count("\n")
+        return "-----BEGIN PRIVATE KEY-----" + REDACTED + newlines + "-----END PRIVATE KEY-----"
 
     code = PRIVATE_KEY_RE.sub(_redact_key, code)
 
