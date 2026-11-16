@@ -1,4 +1,4 @@
-"""Builds the LLM context: discovery -> secret redaction -> SAST -> size-limited context."""
+"""Discovery -> secret redaction -> deterministic engines (rules, Bandit) -> size-limited LLM context."""
 import logging
 import os
 import shutil
@@ -7,9 +7,12 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List, Set
 
 from .config import settings
+from .findings import Finding, dedupe
+from .rules import FileContext, bandit_findings, run_rules, secret_findings
+from .rules.ot_ics import is_ot_file
 from .sast import run_bandit_on_file
 from .secrets import format_secret_findings, scan_and_redact_secrets
 
@@ -48,6 +51,15 @@ class PipelineError(Exception):
 
 
 @dataclass
+class FileScan:
+    ctx: FileContext  # redacted content
+    findings: List[Finding]
+    secrets: int
+    sast: int
+    block: str
+
+
+@dataclass
 class PipelineContext:
     text: str = ""
     files_scanned: int = 0
@@ -55,6 +67,23 @@ class PipelineContext:
     sast_findings: int = 0
     truncated: bool = False
     files: List[str] = field(default_factory=list)
+    findings: List[Finding] = field(default_factory=list)
+    contexts: Dict[str, FileContext] = field(default_factory=dict)
+    ot_files: Set[str] = field(default_factory=set)
+    config_files: List[Dict[str, str]] = field(default_factory=list)
+    dependencies: Dict = field(default_factory=dict)
+    engines: Set[str] = field(default_factory=set)
+
+    def add(self, scan: FileScan) -> None:
+        self.text += scan.block
+        self.files_scanned += 1
+        self.secrets_found += scan.secrets
+        self.sast_findings += scan.sast
+        self.files.append(scan.ctx.path)
+        self.findings.extend(scan.findings)
+        self.contexts[scan.ctx.path] = scan.ctx
+        if is_ot_file(scan.ctx):
+            self.ot_files.add(scan.ctx.path)
 
 
 def _force_rmtree(path: str) -> None:
@@ -71,13 +100,27 @@ def _force_rmtree(path: str) -> None:
         shutil.rmtree(path, onerror=_onerror)
 
 
-def build_file_context(rel_path: str, language: str, code: str, workdir: str) -> tuple:
-    """Redact secrets, run SAST where supported and render one file block for the prompt."""
+def render_block(scan: FileScan, secret_text: str, sast_text: str) -> str:
+    listed = "\n".join(
+        f"- id={f.fingerprint} rule={f.rule_id} line={f.line}: {f.title}" for f in scan.findings
+    ) or "none"
+    return (
+        f"\n--- FILE: {scan.ctx.path} ---\n"
+        f"LANGUAGE: {scan.ctx.language}\n"
+        f"STATIC SECRETS: {secret_text}\n"
+        f"BANDIT SAST: {sast_text}\n"
+        f"DETERMINISTIC FINDINGS (review each id):\n{listed}\n"
+        f"CODE:\n{scan.ctx.text}\n"
+    )
+
+
+def scan_file(rel_path: str, language: str, code: str, workdir: str) -> FileScan:
+    """Redact secrets first; every engine below only ever sees the redacted text."""
     redacted_code, secrets = scan_and_redact_secrets(code, rel_path)
+    ctx = FileContext(rel_path, language, redacted_code)
     sast_text, sast = "N/A", []
 
     if language == "PYTHON":
-        # Bandit only ever sees the redacted version of the code.
         tmp_path = os.path.join(workdir, "_scan_target.py")
         with open(tmp_path, "w", encoding="utf-8") as f:
             f.write(redacted_code)
@@ -86,26 +129,29 @@ def build_file_context(rel_path: str, language: str, code: str, workdir: str) ->
         finally:
             os.remove(tmp_path)
 
-    block = (
-        f"\n--- FILE: {rel_path} ---\n"
-        f"LANGUAGE: {language}\n"
-        f"STATIC SECRETS: {format_secret_findings(secrets)}\n"
-        f"BANDIT SAST: {sast_text}\n"
-        f"CODE:\n{redacted_code}\n"
-    )
-    return block, len(secrets), len(sast)
+    findings = dedupe(run_rules(ctx) + bandit_findings(ctx, sast) + secret_findings(ctx, secrets))
+    scan = FileScan(ctx=ctx, findings=findings, secrets=len(secrets), sast=len(sast), block="")
+    scan.block = render_block(scan, format_secret_findings(secrets), sast_text)
+    return scan
 
 
 def build_snippet_context(code: str, language: str) -> PipelineContext:
     workdir = tempfile.mkdtemp(prefix="appsec-snippet-")
     try:
-        block, n_secrets, n_sast = build_file_context(
-            f"snippet{SNIPPET_EXT.get(language, '')}", language.upper(), code, workdir
-        )
+        scan = scan_file(f"snippet{SNIPPET_EXT.get(language, '')}", language.upper(), code, workdir)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
-    return PipelineContext(text=block, files_scanned=1, secrets_found=n_secrets, sast_findings=n_sast,
-                           files=["snippet"])
+    ctx = PipelineContext()
+    ctx.add(scan)
+    ctx.engines = _engines(ctx, language.upper())
+    return ctx
+
+
+def _engines(ctx: PipelineContext, *languages: str) -> Set[str]:
+    engines = {"secrets", "rules"}
+    if "PYTHON" in languages:
+        engines.add("bandit")
+    return engines
 
 
 def iter_source_files(root: str):
@@ -119,35 +165,39 @@ def iter_source_files(root: str):
                 yield path, os.path.relpath(path, root).replace(os.sep, "/"), LANGUAGE_BY_EXT[ext]
 
 
+def _read(path: str):
+    try:
+        if os.path.getsize(path) > settings.max_file_bytes:
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
 def collect_directory_context(root: str) -> PipelineContext:
     ctx = PipelineContext()
+    languages = set()
     workdir = tempfile.mkdtemp(prefix="appsec-work-")
     try:
         for path, rel_path, language in iter_source_files(root):
             if ctx.files_scanned >= settings.max_repo_files:
                 ctx.truncated = True
                 break
-            try:
-                if os.path.getsize(path) > settings.max_file_bytes:
-                    continue
-                with open(path, "r", encoding="utf-8") as f:
-                    code = f.read()
-            except (OSError, UnicodeDecodeError):
+            code = _read(path)
+            if code is None:
                 continue
 
-            block, n_secrets, n_sast = build_file_context(rel_path, language, code, workdir)
-            if len(ctx.text) + len(block) > settings.max_context_chars:
+            scan = scan_file(rel_path, language, code, workdir)
+            if len(ctx.text) + len(scan.block) > settings.max_context_chars:
                 ctx.text += "\n--- [TRUNCATED] Maximum context limit reached ---\n"
                 ctx.truncated = True
                 break
-
-            ctx.text += block
-            ctx.files_scanned += 1
-            ctx.secrets_found += n_secrets
-            ctx.sast_findings += n_sast
-            ctx.files.append(rel_path)
+            ctx.add(scan)
+            languages.add(language)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
+    ctx.engines = _engines(ctx, *languages)
     return ctx
 
 
