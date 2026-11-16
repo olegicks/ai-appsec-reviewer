@@ -453,11 +453,11 @@ def ot008_ast(ctx: FileContext) -> Iterator[Match]:
 
 def _assignment_pairs(ctx: FileContext) -> Iterator[Match]:
     consts = pa.module_constants(ctx.tree)
-    user = next((v for k, v in consts.items() if k.lower() in {"username", "user", "login", "device_user", "plc_user"}), None)
+    user = next((v for k, v in consts.items() if k.lower().endswith(("user", "username", "login"))), None)
     for node in getattr(ctx.tree, "body", []):
         if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant):
             names = [t.id.lower() for t in node.targets if isinstance(t, ast.Name)]
-            if any(n in {"password", "passwd", "pwd", "device_password", "plc_password"} for n in names):
+            if any(n.endswith(("password", "passwd", "pwd")) for n in names):
                 if _default_pair(user, node.value.value):
                     yield Match(line=node.lineno, detail="Default or empty device password constant.")
 

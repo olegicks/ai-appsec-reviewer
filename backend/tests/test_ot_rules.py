@@ -118,3 +118,10 @@ def test_ot_file_detection():
     assert is_ot_file(FileContext("a.py", "PYTHON", "import pymodbus\n"))
     assert is_ot_file(FileContext("a.js", "JAVASCRIPT", "// read the substation PLC\n"))
     assert not is_ot_file(FileContext("a.py", "PYTHON", "print('hello')\n"))
+
+
+def test_smart_grid_sample_triggers_most_of_the_pack():
+    findings = scan(FIXTURES / "smart_grid_gateway.py")
+    ids = {f.rule_id for f in findings}
+
+    assert {"OT-001", "OT-002", "OT-005", "OT-006", "OT-007", "OT-008", "OT-009", "OT-010"} <= ids
