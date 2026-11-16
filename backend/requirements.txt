@@ -5,3 +5,5 @@ pydantic
 python-dotenv
 slowapi
 bandit
+pyyaml
+httpx

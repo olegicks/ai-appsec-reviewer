@@ -41,8 +41,17 @@ class Settings:
     max_repo_files: int = field(default_factory=lambda: _int_env("MAX_REPO_FILES", 20))
     max_file_bytes: int = field(default_factory=lambda: _int_env("MAX_FILE_BYTES", 30 * 1024))
     max_context_chars: int = field(default_factory=lambda: _int_env("MAX_CONTEXT_CHARS", 60_000))
+    max_config_files: int = field(default_factory=lambda: _int_env("MAX_CONFIG_FILES", 10))
     clone_timeout: int = field(default_factory=lambda: _int_env("CLONE_TIMEOUT", 15))
     bandit_timeout: int = field(default_factory=lambda: _int_env("BANDIT_TIMEOUT", 10))
+
+
+    # Dependency check (OSV.dev). Disabled automatically in tests; OSV_ENABLED=false turns it off.
+    osv_enabled: bool = field(default_factory=lambda: os.getenv("OSV_ENABLED", "true").strip().lower() not in ("0", "false", "no"))
+    osv_timeout: float = field(default_factory=lambda: float(_int_env("OSV_TIMEOUT", 8)))
+    osv_budget: float = field(default_factory=lambda: float(_int_env("OSV_BUDGET", 15)))
+    osv_max_packages: int = field(default_factory=lambda: _int_env("OSV_MAX_PACKAGES", 200))
+    osv_max_vulns: int = field(default_factory=lambda: _int_env("OSV_MAX_VULNS", 30))
 
 
 settings = Settings()

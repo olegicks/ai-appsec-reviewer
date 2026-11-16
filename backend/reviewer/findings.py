@@ -75,6 +75,8 @@ class Finding:
     def fingerprint(self) -> str:
         """Stable id: rule + file + line + hash of the (redacted) code excerpt."""
         basis = " ".join(self.snippet.split())
+        if self.engine == "deps":  # one manifest line can carry several advisories
+            basis += "|" + str(self.extra.get("dependency", {}).get("vuln_id", ""))
         if self.engine == "llm":  # AI findings have no rule id of their own; the title tells them apart
             basis += "|".join(("", self.title, self.severity, self.description))
         snippet_hash = hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12]
