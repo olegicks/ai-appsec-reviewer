@@ -9,9 +9,15 @@ import tempfile
 from dataclasses import dataclass, field
 from typing import Dict, List, Set
 
+from . import osv
 from .config import settings
 from .findings import Finding, dedupe
 from .rules import FileContext, bandit_findings, run_rules, secret_findings
+from .rules.config import (
+    COMPOSE, CONFIG_KINDS, DOCKERFILE, K8S, MANIFEST_KINDS, PACKAGE_JSON, PYPROJECT, REQUIREMENTS, detect_from_content,
+    detect_kind,
+)
+from .rules.deps import parse_manifest
 from .rules.ot_ics import is_ot_file
 from .sast import run_bandit_on_file
 from .secrets import format_secret_findings, scan_and_redact_secrets
@@ -39,6 +45,8 @@ SKIP_DIRS = {
     ".git", "node_modules", "vendor", "dist", "build", "venv", ".venv", "__pycache__",
     "site-packages", ".next", "coverage", "third_party",
 }
+
+CONFIG_EXTS = {".yml", ".yaml", ".txt", ".toml", ".json", ".dockerfile"}
 
 SNIPPET_EXT = {"python": ".py", "javascript": ".js", "typescript": ".ts", "java": ".java", "cpp": ".cpp", "go": ".go"}
 
@@ -116,7 +124,8 @@ def render_block(scan: FileScan, secret_text: str, sast_text: str) -> str:
 
 def scan_file(rel_path: str, language: str, code: str, workdir: str) -> FileScan:
     """Redact secrets first; every engine below only ever sees the redacted text."""
-    redacted_code, secrets = scan_and_redact_secrets(code, rel_path)
+    is_config = language in CONFIG_KINDS + MANIFEST_KINDS
+    redacted_code, secrets = scan_and_redact_secrets(code, rel_path, config=is_config)
     ctx = FileContext(rel_path, language, redacted_code)
     sast_text, sast = "N/A", []
 
@@ -135,34 +144,88 @@ def scan_file(rel_path: str, language: str, code: str, workdir: str) -> FileScan
     return scan
 
 
+CONFIG_SNIPPET_NAMES = {
+    DOCKERFILE: "Dockerfile", COMPOSE: "docker-compose.yml", K8S: "manifest.yaml",
+    REQUIREMENTS: "requirements.txt", PYPROJECT: "pyproject.toml", PACKAGE_JSON: "package.json",
+}
+
+
 def build_snippet_context(code: str, language: str) -> PipelineContext:
+    if language == "config":
+        kind = detect_from_content(code)
+        if kind is None:
+            raise PipelineError(422, "Unrecognised configuration. Paste a Dockerfile, docker-compose file, Kubernetes "
+                                     "manifest, requirements.txt, pyproject.toml or package.json.")
+        path, file_language = CONFIG_SNIPPET_NAMES[kind], kind
+    else:
+        path, file_language = f"snippet{SNIPPET_EXT.get(language, '')}", language.upper()
+
     workdir = tempfile.mkdtemp(prefix="appsec-snippet-")
     try:
-        scan = scan_file(f"snippet{SNIPPET_EXT.get(language, '')}", language.upper(), code, workdir)
+        scan = scan_file(path, file_language, code, workdir)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
     ctx = PipelineContext()
     ctx.add(scan)
-    ctx.engines = _engines(ctx, language.upper())
+    _register_config(ctx, scan.ctx)
+    _check_dependencies(ctx)
+    ctx.engines = _engines(ctx, file_language)
     return ctx
+
+
+def _register_config(ctx: PipelineContext, file_ctx: FileContext) -> None:
+    if file_ctx.language in CONFIG_KINDS + MANIFEST_KINDS:
+        ctx.config_files.append({"file": file_ctx.path, "kind": file_ctx.language})
+
+
+def _check_dependencies(ctx: PipelineContext) -> None:
+    """Parse every scanned manifest and run one batched OSV lookup."""
+    deps = []
+    for file_ctx in ctx.contexts.values():
+        if file_ctx.language in MANIFEST_KINDS:
+            deps.extend(parse_manifest(file_ctx.language, file_ctx.path, file_ctx.text) or [])
+    if not any(c["kind"] in MANIFEST_KINDS for c in ctx.config_files):
+        ctx.dependencies = {"status": "not_applicable", "source": "OSV.dev", "checked": 0, "vulnerable": 0,
+                            "note": "No dependency manifests found."}
+        return
+    findings, status = osv.lookup(deps)
+    if not deps:
+        status = {**status, "note": "No pinned dependency versions found to check."}
+    ctx.findings.extend(findings)
+    ctx.dependencies = status
 
 
 def _engines(ctx: PipelineContext, *languages: str) -> Set[str]:
     engines = {"secrets", "rules"}
     if "PYTHON" in languages:
         engines.add("bandit")
+    if any(c["kind"] in CONFIG_KINDS for c in ctx.config_files):
+        engines.add("config")
+    if any(c["kind"] in MANIFEST_KINDS for c in ctx.config_files):
+        engines.add("deps")
     return engines
 
 
 def iter_source_files(root: str):
-    """Yield (absolute path, relative path, language) in a stable order, skipping vendored dirs."""
+    """Yield (absolute path, relative path, language) in a stable order, skipping vendored dirs.
+
+    Source files come first; config files and dependency manifests follow with their own cap.
+    """
+    configs = []
     for current, dirs, files in os.walk(root):
         dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith("."))
         for name in sorted(files):
+            path = os.path.join(current, name)
+            rel = os.path.relpath(path, root).replace(os.sep, "/")
             ext = os.path.splitext(name)[1].lower()
             if ext in LANGUAGE_BY_EXT:
-                path = os.path.join(current, name)
-                yield path, os.path.relpath(path, root).replace(os.sep, "/"), LANGUAGE_BY_EXT[ext]
+                yield path, rel, LANGUAGE_BY_EXT[ext]
+            elif ext in CONFIG_EXTS or name.lower().startswith("dockerfile"):
+                configs.append((path, rel))
+    for path, rel in configs:
+        kind = detect_kind(rel, _read(path) or "")
+        if kind:
+            yield path, rel, kind
 
 
 def _read(path: str):
@@ -178,12 +241,15 @@ def _read(path: str):
 def collect_directory_context(root: str) -> PipelineContext:
     ctx = PipelineContext()
     languages = set()
+    counts = {"code": 0, "config": 0}
+    limits = {"code": settings.max_repo_files, "config": settings.max_config_files}
     workdir = tempfile.mkdtemp(prefix="appsec-work-")
     try:
         for path, rel_path, language in iter_source_files(root):
-            if ctx.files_scanned >= settings.max_repo_files:
+            group = "config" if language in CONFIG_KINDS + MANIFEST_KINDS else "code"
+            if counts[group] >= limits[group]:
                 ctx.truncated = True
-                break
+                continue
             code = _read(path)
             if code is None:
                 continue
@@ -194,9 +260,12 @@ def collect_directory_context(root: str) -> PipelineContext:
                 ctx.truncated = True
                 break
             ctx.add(scan)
+            _register_config(ctx, scan.ctx)
             languages.add(language)
+            counts[group] += 1
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
+    _check_dependencies(ctx)
     ctx.engines = _engines(ctx, *languages)
     return ctx
 
@@ -222,5 +291,5 @@ def build_repository_context(repo_url: str) -> PipelineContext:
     finally:
         _force_rmtree(temp_dir)
     if not ctx.files_scanned:
-        raise PipelineError(422, "No supported source files found in the repository.")
+        raise PipelineError(422, "No supported source or configuration files found in the repository.")
     return ctx
