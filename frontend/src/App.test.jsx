@@ -108,6 +108,27 @@ describe('App', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('AI engine request failed.');
   });
 
+  it('explains when the configured AI model is unavailable', async () => {
+    mockApi({
+      analyze: () => ({
+        ok: false,
+        status: 503,
+        json: async () => ({
+          detail: "The configured AI model 'old-model' is not available. Set OPENAI_MODEL to a current model.",
+          code: 'model_unavailable',
+        }),
+      }),
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: /run analysis/i }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('AI engine unavailable');
+    expect(alert).toHaveTextContent("'old-model' is not available");
+  });
+
   it('shows a success message when nothing is found', async () => {
     mockApi({ analyze: () => ({ ok: true, status: 200, json: async () => ({ ...RESULT, vulnerabilities: [] }) }) });
     const user = userEvent.setup();

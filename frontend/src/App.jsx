@@ -52,11 +52,11 @@ function App() {
   const runAnalysis = useCallback(async () => {
     if (controllerRef.current) return;
     if (mode === 'snippet' && code.trim().length < 5) {
-      setError('Paste at least a few lines of code to analyze.');
+      setError({ message: 'Paste at least a few lines of code to analyze.' });
       return;
     }
     if (mode === 'repo' && !repoUrl.trim()) {
-      setError('Enter a public GitHub repository URL.');
+      setError({ message: 'Enter a public GitHub repository URL.' });
       return;
     }
 
@@ -74,7 +74,7 @@ function App() {
       );
       setResult(data);
     } catch (err) {
-      if (err.name !== 'AbortError') setError(err.message);
+      if (err.name !== 'AbortError') setError({ message: err.message, code: err.code });
     } finally {
       controllerRef.current = null;
       setLoading(false);

@@ -26,6 +26,11 @@ describe('analyze', () => {
     await expect(analyze({})).rejects.toMatchObject({ message: 'Failed to clone repository.', status: 400 });
   });
 
+  it('keeps the machine-readable error code', async () => {
+    mockFetch(503, { detail: "The configured AI model 'old-model' is not available", code: 'model_unavailable' });
+    await expect(analyze({})).rejects.toMatchObject({ status: 503, code: 'model_unavailable' });
+  });
+
   it('flattens FastAPI validation errors', async () => {
     mockFetch(422, { detail: [{ msg: 'Value error, Only public https://github.com/owner/repo URLs are allowed' }] });
     await expect(analyze({})).rejects.toThrow('Only public https://github.com/owner/repo URLs are allowed');

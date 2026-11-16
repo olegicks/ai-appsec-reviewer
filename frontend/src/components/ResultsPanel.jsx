@@ -5,6 +5,16 @@ import ScanProgress from './ScanProgress';
 import SummaryBar from './SummaryBar';
 import VulnCard from './VulnCard';
 
+// Server-side configuration problems (missing key, deprecated model, quota) - not the user's input.
+const AI_CONFIG_ERRORS = new Set([
+  'ai_not_configured',
+  'model_unavailable',
+  'model_access_denied',
+  'model_parameter_unsupported',
+  'ai_auth_failed',
+  'ai_quota_exceeded',
+]);
+
 function EmptyState() {
   return (
     <div className="empty-state">
@@ -39,8 +49,8 @@ export default function ResultsPanel({ mode, loading, error, result, onExport })
       <div className="alert alert-error" role="alert">
         <AlertIcon width={18} height={18} />
         <div>
-          <b>Analysis failed</b>
-          <p>{error}</p>
+          <b>{AI_CONFIG_ERRORS.has(error.code) ? 'AI engine unavailable' : 'Analysis failed'}</b>
+          <p>{error.message}</p>
         </div>
       </div>
     );
