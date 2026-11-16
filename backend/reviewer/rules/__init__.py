@@ -20,9 +20,10 @@ def rules_by_pack(pack: str) -> List[Rule]:
     return [r for r in ALL_RULES if r.pack == pack]
 
 
-from . import ot_ics  # noqa: E402  (rule packs register themselves below)
+from . import config, ot_ics  # noqa: E402  (rule packs register themselves below)
 
 register(*ot_ics.RULES)
+register(*config.RULES)
 
 
 __all__ = [
