@@ -3,6 +3,8 @@ import sys
 
 # Deterministic settings for the whole suite; must be set before the app is imported.
 os.environ["OPENAI_API_KEY"] = "test-key"
+os.environ["OPENAI_MODEL"] = "test-model"
+os.environ.pop("OPENAI_TEMPERATURE", None)
 os.environ["FRONTEND_URL"] = "http://localhost:5173"
 os.environ.pop("RATE_LIMIT", None)
 

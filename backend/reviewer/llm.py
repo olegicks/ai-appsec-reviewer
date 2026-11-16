@@ -29,10 +29,11 @@ OUTPUT_SCHEMA = """{
 
 
 class LLMError(Exception):
-    def __init__(self, status_code: int, detail: str):
+    def __init__(self, status_code: int, detail: str, code: str = "ai_error"):
         super().__init__(detail)
         self.status_code = status_code
         self.detail = detail
+        self.code = code
 
 
 def get_system_prompt(paranoia: str) -> str:
@@ -66,7 +67,9 @@ def get_client():
     from openai import OpenAI
 
     if not settings.openai_api_key:
-        raise LLMError(503, "AI engine is not configured on the server (OPENAI_API_KEY missing).")
+        raise LLMError(503, "AI engine is not configured on the server (OPENAI_API_KEY missing).", "ai_not_configured")
+    if not settings.model_id:
+        raise LLMError(503, "AI engine is not configured on the server (OPENAI_MODEL missing).", "ai_not_configured")
     return OpenAI(api_key=settings.openai_api_key, timeout=60.0, max_retries=1)
 
 
@@ -88,19 +91,67 @@ def parse_ai_response(content: str) -> AIAnalysisResult:
     return result
 
 
+def _error_code(exc) -> str:
+    code = getattr(exc, "code", None)
+    if not code and isinstance(getattr(exc, "body", None), dict):
+        code = exc.body.get("code")
+    return str(code or "")
+
+
+def map_openai_error(exc: Exception) -> LLMError:
+    """Translate an OpenAI SDK exception into a clear, key-free LLMError."""
+    import openai
+
+    model = settings.model_id
+    code = _error_code(exc)
+    message = str(getattr(exc, "message", "") or "").lower()
+    model_hint = (
+        f"The configured AI model '{model}' is not available: it may be deprecated, shut down or not enabled "
+        "for this API key. Set OPENAI_MODEL to a current model."
+    )
+
+    if isinstance(exc, openai.NotFoundError) or code == "model_not_found" or (
+        isinstance(exc, openai.BadRequestError) and "model" in message
+        and any(w in message for w in ("does not exist", "deprecated", "not found", "decommission", "shut down"))
+    ):
+        return LLMError(503, model_hint, "model_unavailable")
+    if isinstance(exc, openai.PermissionDeniedError):
+        return LLMError(503, f"The API key does not have access to the model '{model}'.", "model_access_denied")
+    if isinstance(exc, openai.BadRequestError) and code in ("unsupported_parameter", "unsupported_value"):
+        return LLMError(
+            503,
+            f"The model '{model}' rejected a request parameter. Remove OPENAI_TEMPERATURE or choose another model.",
+            "model_parameter_unsupported",
+        )
+    if isinstance(exc, openai.AuthenticationError):
+        return LLMError(503, "OpenAI rejected the server's API key (invalid, revoked or expired).", "ai_auth_failed")
+    if isinstance(exc, openai.RateLimitError):
+        if code == "insufficient_quota":
+            return LLMError(503, "The OpenAI account has run out of quota. Check billing and limits.", "ai_quota_exceeded")
+        return LLMError(429, "The AI engine is rate limited. Please try again in a minute.", "ai_rate_limited")
+    if isinstance(exc, (openai.APITimeoutError, openai.APIConnectionError)):
+        return LLMError(504, "The AI engine did not respond in time. Please try again.", "ai_unreachable")
+    return LLMError(502, "AI engine request failed. Please try again in a moment.", "ai_error")
+
+
 def run_ai_analysis(context: str, paranoia: str) -> AIAnalysisResult:
     client = get_client()
+    params = {
+        "model": settings.model_id,
+        "messages": [
+            {"role": "system", "content": get_system_prompt(paranoia)},
+            {"role": "user", "content": context},
+        ],
+        "response_format": {"type": "json_object"},
+    }
+    if settings.temperature is not None:
+        params["temperature"] = settings.temperature
     try:
-        response = client.chat.completions.create(
-            model=settings.model_id,
-            messages=[
-                {"role": "system", "content": get_system_prompt(paranoia)},
-                {"role": "user", "content": context},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.0,
-        )
-    except Exception:
-        logger.exception("OpenAI request failed")
-        raise LLMError(502, "AI engine request failed. Please try again in a moment.")
+        response = client.chat.completions.create(**params)
+    except Exception as exc:
+        error = map_openai_error(exc)
+        # Log type and status only; SDK messages are not needed and never contain the key, but stay terse anyway.
+        logger.warning("OpenAI request failed: %s status=%s code=%s -> %s",
+                       type(exc).__name__, getattr(exc, "status_code", None), _error_code(exc), error.code)
+        raise error
     return parse_ai_response(response.choices[0].message.content)

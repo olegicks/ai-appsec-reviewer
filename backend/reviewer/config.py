@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass, field
+from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -13,6 +14,14 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
+def _float_env(name: str) -> Optional[float]:
+    raw = os.getenv(name, "").strip()
+    try:
+        return float(raw) if raw else None
+    except ValueError:
+        return None
+
+
 def _origins() -> list:
     raw = os.getenv("FRONTEND_URL", "http://localhost:5173")
     return [o.strip().rstrip("/") for o in raw.split(",") if o.strip()]
@@ -21,7 +30,10 @@ def _origins() -> list:
 @dataclass(frozen=True)
 class Settings:
     openai_api_key: str = field(default_factory=lambda: os.getenv("OPENAI_API_KEY", ""))
-    model_id: str = field(default_factory=lambda: os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
+    # No built-in default: model names get deprecated, so the deployment must choose one explicitly.
+    model_id: str = field(default_factory=lambda: os.getenv("OPENAI_MODEL", "").strip())
+    # Only sent when set - some newer models reject a custom temperature.
+    temperature: Optional[float] = field(default_factory=lambda: _float_env("OPENAI_TEMPERATURE"))
     allowed_origins: list = field(default_factory=_origins)
     rate_limit: str = field(default_factory=lambda: os.getenv("RATE_LIMIT", "5/minute"))
 

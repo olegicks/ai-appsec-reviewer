@@ -48,7 +48,10 @@ async def security_headers(request: Request, call_next):
 @app.exception_handler(PipelineError)
 @app.exception_handler(LLMError)
 async def pipeline_error_handler(_request: Request, exc):
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    content = {"detail": exc.detail}
+    if getattr(exc, "code", None):
+        content["code"] = exc.code
+    return JSONResponse(status_code=exc.status_code, content=content)
 
 
 def summarize(vulnerabilities) -> dict:
@@ -104,6 +107,6 @@ def health():
     return {
         "status": "ok",
         "version": __version__,
-        "ai_configured": bool(settings.openai_api_key),
-        "model": settings.model_id,
+        "ai_configured": bool(settings.openai_api_key and settings.model_id),
+        "model": settings.model_id or None,
     }
