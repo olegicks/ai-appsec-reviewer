@@ -415,7 +415,6 @@ OT_007 = Rule(
     remediation="Move device addresses into protected configuration or an asset inventory, and make sure the "
                 "endpoint is only reachable from the intended control zone.",
     references=("https://cwe.mitre.org/data/definitions/1051.html",),
-    exposure=True,
     match_ast=ot007_ast,
     match_text=ot007_text,
 )
