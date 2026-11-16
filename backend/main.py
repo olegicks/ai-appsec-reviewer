@@ -11,6 +11,7 @@ from slowapi.util import get_remote_address
 from reviewer.config import settings
 from reviewer.llm import LLMError, run_ai_analysis
 from reviewer.pipeline import PipelineError, build_repository_context, build_snippet_context
+from reviewer.report import ReportNarrative, ReportRequest, build_narrative
 from reviewer.analysis import build_findings, build_response
 from reviewer.schemas import AnalyzeRequest, AnalyzeResponse
 
@@ -86,6 +87,16 @@ def analyze_code(request: Request, payload: AnalyzeRequest):
         ai_status="used" if ai_ready else "not_configured",
         duration_ms=duration_ms,
     )
+
+
+@app.post("/report", response_model=ReportNarrative)
+@limiter.limit(settings.rate_limit)
+def report_narrative(request: Request, payload: ReportRequest):
+    """Executive summary and mitigations for the Security Assessment Report.
+
+    Uses the AI engine when configured (validated output) and a deterministic narrative otherwise.
+    """
+    return build_narrative(payload)
 
 
 @app.get("/")
