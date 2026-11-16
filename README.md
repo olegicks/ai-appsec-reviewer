@@ -9,7 +9,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![React](https://img.shields.io/badge/React_19-20232A?logo=react&logoColor=61DAFB)
 ![Vite](https://img.shields.io/badge/Vite-646CFF?logo=vite&logoColor=white)
-![OpenAI](https://img.shields.io/badge/gpt--4o--mini-412991?logo=openai&logoColor=white)
+![OpenAI](https://img.shields.io/badge/OpenAI-configurable_model-412991?logo=openai&logoColor=white)
 
 [**Live Demo**](https://ai-appsec-reviewer-7qgg.vercel.app/) · [**API**](https://ai-appsec-reviewer.onrender.com/health) · [Architecture](#-how-the-pipeline-works) · [Local Setup](#-local-setup)
 
@@ -124,7 +124,7 @@ curl -X POST http://localhost:8000/analyze \
     }
   ],
   "summary": { "CRITICAL": 0, "HIGH": 1, "MEDIUM": 0, "LOW": 0, "INFO": 0, "TOTAL": 1 },
-  "meta": { "mode": "snippet", "model": "gpt-4o-mini", "paranoia_level": "standard",
+  "meta": { "mode": "snippet", "model": "<OPENAI_MODEL>", "paranoia_level": "standard",
             "files_scanned": 1, "secrets_found": 0, "sast_findings": 1, "truncated": false, "duration_ms": 4210 }
 }
 ```
@@ -147,17 +147,30 @@ cd backend
 python -m venv venv
 source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env            # then put your OPENAI_API_KEY in .env
+cp .env.example .env            # then set OPENAI_API_KEY and OPENAI_MODEL in .env
 uvicorn main:app --reload
 ```
 
 | Variable | Default | Description |
 |---|---|---|
 | `OPENAI_API_KEY` | – | **Required** to run analyses (the server still starts without it) |
-| `OPENAI_MODEL` | `gpt-4o-mini` | Model used for triage |
+| `OPENAI_MODEL` | – | **Required.** Model used for triage. There is no built-in default because OpenAI retires models; check the [deprecations page](https://developers.openai.com/api/docs/deprecations) |
+| `OPENAI_TEMPERATURE` | unset | Optional sampling temperature; leave unset for models that reject it |
 | `FRONTEND_URL` | `http://localhost:5173` | Allowed CORS origin(s), comma-separated |
 | `RATE_LIMIT` | `5/minute` | Per-IP limit for `/analyze` |
 | `MAX_REPO_FILES` / `MAX_FILE_BYTES` / `MAX_CONTEXT_CHARS` | `20` / `30720` / `60000` | Repository scan limits |
+
+If the AI engine can't be used, `/analyze` returns a JSON error with a machine-readable `code`, and the UI shows it as **AI engine unavailable**:
+
+| `code` | HTTP | Meaning |
+|---|---|---|
+| `ai_not_configured` | 503 | `OPENAI_API_KEY` or `OPENAI_MODEL` is not set |
+| `model_unavailable` | 503 | The model is deprecated, shut down or unknown |
+| `model_access_denied` | 503 | The API key has no access to the model |
+| `model_parameter_unsupported` | 503 | The model rejected a parameter (e.g. `OPENAI_TEMPERATURE`) |
+| `ai_auth_failed` | 503 | The API key is invalid, revoked or expired |
+| `ai_quota_exceeded` | 503 | The OpenAI account is out of quota |
+| `ai_rate_limited` / `ai_unreachable` | 429 / 504 | Temporary; retry later |
 
 ### Frontend
 
