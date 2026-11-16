@@ -7,8 +7,12 @@ on:
 
 jobs:
   backend:
-    name: Backend tests
+    name: Backend tests & offline evaluation
     runs-on: ubuntu-latest
+    env:
+      # No real OpenAI or OSV calls in CI.
+      OPENAI_API_KEY: ""
+      OSV_ENABLED: "false"
     defaults:
       run:
         working-directory: backend
@@ -21,6 +25,11 @@ jobs:
           cache-dependency-path: backend/requirements*.txt
       - run: pip install -r requirements-dev.txt
       - run: pytest
+      - name: Offline evaluation (fails if OT rule recall or false-positive rate regress)
+        working-directory: .
+        run: |
+          python -m eval.run --engine sast
+          python -m eval.run --engine rules --check
 
   frontend:
     name: Frontend lint, tests & build
