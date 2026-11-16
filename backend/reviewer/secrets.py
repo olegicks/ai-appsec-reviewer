@@ -20,6 +20,13 @@ SECRET_PATTERNS = {
     ),
 }
 
+# Config files (Dockerfile ENV, YAML, .env-style) often hold unquoted values. Only used for config input,
+# because in source code an unquoted right-hand side is usually an expression, not a secret.
+CONFIG_SECRET_RE = re.compile(
+    r"(?i)\b[\w.-]*(?:passw(?:or)?d|passwd|secret|token|api[_-]?key|access[_-]?key)[\w.-]*[\"']?\s*[:=]\s*"
+    r"(?P<secret>(?![$<{\[\"'/.~])[^\s\"'#,;]{6,})"  # skip ${VAR}, <placeholders>, quoted values and file paths
+)
+
 PRIVATE_KEY_RE = re.compile(
     r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----"
 )
@@ -35,8 +42,11 @@ class SecretFinding:
         return f"[{self.file}] Line {self.line}: {self.type} detected."
 
 
-def scan_and_redact_secrets(code: str, filename: str) -> Tuple[str, List[SecretFinding]]:
-    """Return the code with every detected secret replaced by [REDACTED] plus the list of findings."""
+def scan_and_redact_secrets(code: str, filename: str, config: bool = False) -> Tuple[str, List[SecretFinding]]:
+    """Return the code with every detected secret replaced by [REDACTED] plus the list of findings.
+
+    `config=True` also catches unquoted values (`ENV DB_PASSWORD=hunter22`, `password: hunter22`).
+    """
     findings: List[SecretFinding] = []
 
     def _redact_key(match: re.Match) -> str:
@@ -51,7 +61,10 @@ def scan_and_redact_secrets(code: str, filename: str) -> Tuple[str, List[SecretF
     redacted_lines = []
     for line_num, line in enumerate(code.split("\n"), 1):
         seen_spans = []
-        for secret_type, pattern in SECRET_PATTERNS.items():
+        patterns = list(SECRET_PATTERNS.items())
+        if config:
+            patterns.append(("Hardcoded Credential", CONFIG_SECRET_RE))
+        for secret_type, pattern in patterns:
             for match in pattern.finditer(line):
                 span = match.span("secret")
                 if any(span[0] < s[1] and s[0] < span[1] for s in seen_spans):
