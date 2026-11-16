@@ -1,11 +1,11 @@
 import re
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
 SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
 CONFIDENCES = ("HIGH", "MEDIUM", "LOW")
-SNIPPET_LANGUAGES = ("python", "javascript", "typescript", "java", "cpp", "go")
+SNIPPET_LANGUAGES = ("python", "javascript", "typescript", "java", "cpp", "go", "config")
 
 GITHUB_REPO_RE = re.compile(r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?(\.git)?/?$")
 
@@ -53,8 +53,52 @@ class VulnerabilityFinding(BaseModel):
         return str(v) if v is not None else "N/A"
 
 
+class AIReview(BaseModel):
+    """The model's verdict on one deterministic finding, referenced by its fingerprint."""
+
+    id: str = Field(max_length=64)
+    verdict: str = Field(pattern="^(confirmed|false_positive)$")
+    reason: str = Field(default="", max_length=1000)
+
+    @field_validator("verdict", mode="before")
+    @classmethod
+    def normalize_verdict(cls, v):
+        return str(v).strip().lower().replace(" ", "_").replace("-", "_") if v is not None else v
+
+
 class AIAnalysisResult(BaseModel):
-    vulnerabilities: List[VulnerabilityFinding]
+    vulnerabilities: List[VulnerabilityFinding] = Field(default_factory=list)
+    reviews: List[AIReview] = Field(default_factory=list)
+
+
+class RiskOut(BaseModel):
+    id: str = ""
+    likelihood: int
+    impact: int
+    score: int
+    band: str
+    factors: List[str] = Field(default_factory=list)
+
+
+class FindingOut(VulnerabilityFinding):
+    """v1 fields above stay unchanged; everything below is additive (v2)."""
+
+    id: str = ""
+    rule_id: str = ""
+    title: str = ""
+    category: str = ""
+    pack: str = ""
+    engine: str = ""
+    engines: List[str] = Field(default_factory=list)
+    stride: List[str] = Field(default_factory=list)
+    line_number: int = 0
+    excerpt: str = ""
+    references: List[str] = Field(default_factory=list)
+    ai_verdict: str = "not_reviewed"
+    ai_note: str = ""
+    risk: Optional[RiskOut] = None
+    compliance: Dict[str, List[str]] = Field(default_factory=dict)
+    dependency: Optional[Dict[str, Any]] = None
 
 
 class ScanMeta(BaseModel):
@@ -66,9 +110,20 @@ class ScanMeta(BaseModel):
     sast_findings: int
     truncated: bool
     duration_ms: int
+    # v2 (additive)
+    engines: List[str] = Field(default_factory=list)
+    ai_status: str = "used"  # used | not_configured
+    rule_findings: int = 0
+    config_files: List[Dict[str, str]] = Field(default_factory=list)
 
 
 class AnalyzeResponse(BaseModel):
-    vulnerabilities: List[VulnerabilityFinding]
+    vulnerabilities: List[FindingOut]
     summary: Dict[str, int]
     meta: ScanMeta
+    # v2 (additive)
+    risk_matrix: Dict[str, Any] = Field(default_factory=dict)
+    top_risks: List[str] = Field(default_factory=list)
+    stride_summary: Dict[str, int] = Field(default_factory=dict)
+    compliance_summary: Dict[str, Any] = Field(default_factory=dict)
+    dependencies: Dict[str, Any] = Field(default_factory=dict)
