@@ -74,7 +74,10 @@ class Finding:
     @property
     def fingerprint(self) -> str:
         """Stable id: rule + file + line + hash of the (redacted) code excerpt."""
-        snippet_hash = hashlib.sha1(" ".join(self.snippet.split()).encode("utf-8")).hexdigest()[:12]
+        basis = " ".join(self.snippet.split())
+        if self.engine == "llm":  # AI findings have no rule id of their own; the title tells them apart
+            basis += "|".join(("", self.title, self.severity, self.description))
+        snippet_hash = hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12]
         raw = f"{self.rule_id}|{self.file}|{self.line}|{snippet_hash}"
         return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
@@ -91,9 +94,11 @@ def dedupe(findings: List[Finding]) -> List[Finding]:
     for f in by_fp.values():
         key = (f.file, f.line, f.cwe) if f.cwe else None
         existing = index.get(key) if key else None
+        if existing is not None and existing.engine == f.engine:
+            existing = None  # only fold findings of *different* engines together
         if existing is None:
             merged.append(f)
-            if key:
+            if key and key not in index:
                 index[key] = f
             continue
         # Prefer the rule engine's metadata, keep the stricter severity, record both engines.
