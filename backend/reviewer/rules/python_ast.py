@@ -1,6 +1,6 @@
 """Small helpers for AST-based rules."""
 import ast
-from typing import Iterator, Optional, Set
+from typing import Dict, Iterator, Optional, Set, Tuple
 
 
 def dotted_name(node: ast.AST) -> str:
@@ -82,12 +82,55 @@ def imported_modules(tree: ast.AST) -> Set[str]:
     return names
 
 
+def import_aliases(tree: ast.AST) -> Dict[str, str]:
+    """`from x import ModbusTcpClient as MB` -> {'MB': 'ModbusTcpClient'}."""
+    aliases: Dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.asname:
+                    aliases[alias.asname] = alias.name
+    return aliases
+
+
 def method_calls(tree: ast.AST, *names: str) -> Iterator[ast.Call]:
-    """Calls whose final attribute/name is one of `names`."""
+    """Calls whose final attribute/name (after resolving import aliases) is one of `names`."""
+    wanted = set(names)
+    aliases = import_aliases(tree)
+    for call in iter_calls(tree):
+        name = short_name(call)
+        if aliases.get(name, name) in wanted:
+            yield call
+
+
+def module_constants(tree: ast.AST) -> Dict[str, object]:
+    """Module-level `NAME = <literal>` assignments, used to resolve hardcoded hosts and ports."""
+    consts: Dict[str, object] = {}
+    for node in getattr(tree, "body", []):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    consts[target.id] = node.value.value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and isinstance(node.value, ast.Constant):
+            consts[node.target.id] = node.value.value
+    return consts
+
+
+def resolve(node: Optional[ast.AST], consts: Dict[str, object]):
+    """Literal value of `node`, following module-level constants."""
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.Name):
+        return consts.get(node.id)
+    return None
+
+
+def call_receivers(tree: ast.AST, *names: str) -> Iterator[Tuple[ast.Call, str]]:
+    """(call, receiver) for `receiver.method(...)` calls with method in `names`."""
     wanted = set(names)
     for call in iter_calls(tree):
-        if short_name(call) in wanted:
-            yield call
+        if isinstance(call.func, ast.Attribute) and call.func.attr in wanted:
+            yield call, dotted_name(call.func.value)
 
 
 def names_in(node: ast.AST) -> Set[str]:
